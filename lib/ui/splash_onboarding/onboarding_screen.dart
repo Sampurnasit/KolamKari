@@ -1,20 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_typography.dart';
+import '../../data/models/user_profile.dart';
+import '../../providers/app_providers.dart';
 import '../navigation/main_navigation_screen.dart';
 
-class OnboardingScreen extends StatefulWidget {
+class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
 
   @override
-  State<OnboardingScreen> createState() => _OnboardingScreenState();
+  ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen> {
+class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final PageController _pageController = PageController();
+  final TextEditingController _nameController = TextEditingController();
   int _currentPage = 0;
+  String _generatedUsername = '@kolam_artisan';
 
-  final List<_OnboardingPageData> _pages = [
+  final List<_OnboardingPageData> _introPages = [
     const _OnboardingPageData(
       title: 'Sacred Living Heritage',
       subtitle: 'Preserving India\'s ancient threshold art for the digital era.',
@@ -41,8 +46,27 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     ),
   ];
 
+  int get _totalPages => _introPages.length + 1; // 3 intro pages + 1 profile setup page
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController.addListener(() {
+      setState(() {
+        _generatedUsername = UserProfile.generateUsername(_nameController.text);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _pageController.dispose();
+    super.dispose();
+  }
+
   void _onNext() {
-    if (_currentPage < _pages.length - 1) {
+    if (_currentPage < _totalPages - 1) {
       _pageController.nextPage(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
@@ -52,10 +76,45 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  void _completeOnboarding() {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+  void _onSkip() {
+    if (_currentPage < _totalPages - 1) {
+      // Jump directly to Name setup page so they can enter their name
+      _pageController.animateToPage(
+        _totalPages - 1,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+    } else {
+      _completeOnboarding();
+    }
+  }
+
+  Future<void> _completeOnboarding() async {
+    final rawName = _nameController.text.trim();
+    final finalName = rawName.isNotEmpty ? rawName : 'Kolam Artisan';
+    final finalUsername = UserProfile.generateUsername(finalName);
+
+    // Save profile name & auto-generated username
+    await ref.read(userProfileProvider.notifier).updateProfileName(
+      name: finalName,
+      username: finalUsername,
     );
+
+    // Mark onboarding completed in storage
+    final storage = ref.read(storageServiceProvider);
+    await storage.setOnboardingCompleted(true);
+
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          transitionDuration: const Duration(milliseconds: 500),
+          pageBuilder: (_, animation, secondaryAnimation) => const MainNavigationScreen(),
+          transitionsBuilder: (_, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+    }
   }
 
   @override
@@ -80,10 +139,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       Text('KolamKari', style: AppTypography.displayTitle.copyWith(fontSize: 20)),
                     ],
                   ),
-                  TextButton(
-                    onPressed: _completeOnboarding,
-                    child: Text('Skip', style: AppTypography.tagText.copyWith(color: AppColors.textMuted)),
-                  ),
+                  if (_currentPage < _totalPages - 1)
+                    TextButton(
+                      onPressed: _onSkip,
+                      child: Text('Skip', style: AppTypography.tagText.copyWith(color: AppColors.textMuted)),
+                    ),
                 ],
               ),
             ),
@@ -93,95 +153,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               child: PageView.builder(
                 controller: _pageController,
                 onPageChanged: (idx) => setState(() => _currentPage = idx),
-                itemCount: _pages.length,
+                itemCount: _totalPages,
                 itemBuilder: (context, index) {
-                  final data = _pages[index];
-                  return Padding(
-                    padding: const EdgeInsets.all(28.0),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // Icon circle with cultural styling
-                        Container(
-                          width: 120,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            color: data.highlightColor.withValues(alpha: 0.15),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: data.highlightColor.withValues(alpha: 0.5),
-                              width: 2,
-                            ),
-                          ),
-                          child: Icon(data.icon, size: 58, color: data.highlightColor),
-                        ),
-                        const SizedBox(height: 32),
-
-                        // Tag
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: data.highlightColor.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            data.tag,
-                            style: AppTypography.tagText.copyWith(
-                              color: data.highlightColor,
-                              letterSpacing: 1.0,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Title
-                        Text(
-                          data.title,
-                          style: AppTypography.displayTitle.copyWith(
-                            fontSize: 24,
-                            color: isDark ? AppColors.textLight : AppColors.textDark,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 8),
-
-                        // Subtitle
-                        Text(
-                          data.subtitle,
-                          style: AppTypography.cardTitle.copyWith(
-                            color: AppColors.turmericAmber,
-                            fontSize: 15,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Description
-                        Text(
-                          data.description,
-                          style: AppTypography.bodyText.copyWith(
-                            color: isDark ? Colors.white70 : AppColors.textMuted,
-                            fontSize: 14,
-                            height: 1.6,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  );
+                  if (index < _introPages.length) {
+                    return _buildIntroPage(_introPages[index], isDark);
+                  } else {
+                    return _buildNameInputPage(isDark);
+                  }
                 },
               ),
             ),
 
             // Bottom Navigation Indicators & Button
             Padding(
-              padding: const EdgeInsets.fromLTRB(28, 16, 28, 28),
+              padding: const EdgeInsets.fromLTRB(28, 12, 28, 24),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   // Dots indicator
                   Row(
-                    children: List.generate(_pages.length, (idx) {
+                    children: List.generate(_totalPages, (idx) {
                       final isSel = _currentPage == idx;
                       return AnimatedContainer(
                         duration: const Duration(milliseconds: 250),
@@ -205,7 +196,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(_currentPage == _pages.length - 1 ? 'Enter KolamKari' : 'Continue'),
+                        Text(_currentPage == _totalPages - 1 ? 'Enter KolamKari' : 'Continue'),
                         const SizedBox(width: 8),
                         const Icon(Icons.arrow_forward_rounded, size: 18),
                       ],
@@ -216,6 +207,255 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildIntroPage(_OnboardingPageData data, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.all(28.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Icon circle with cultural styling
+          Container(
+            width: 110,
+            height: 110,
+            decoration: BoxDecoration(
+              color: data.highlightColor.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: data.highlightColor.withValues(alpha: 0.5),
+                width: 2,
+              ),
+            ),
+            child: Icon(data.icon, size: 54, color: data.highlightColor),
+          ),
+          const SizedBox(height: 28),
+
+          // Tag
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: data.highlightColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              data.tag,
+              style: AppTypography.tagText.copyWith(
+                color: data.highlightColor,
+                letterSpacing: 1.0,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Title
+          Text(
+            data.title,
+            style: AppTypography.displayTitle.copyWith(
+              fontSize: 24,
+              color: isDark ? AppColors.textLight : AppColors.textDark,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+
+          // Subtitle
+          Text(
+            data.subtitle,
+            style: AppTypography.cardTitle.copyWith(
+              color: AppColors.turmericAmber,
+              fontSize: 15,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+
+          // Description
+          Text(
+            data.description,
+            style: AppTypography.bodyText.copyWith(
+              color: isDark ? Colors.white70 : AppColors.textMuted,
+              fontSize: 14,
+              height: 1.6,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNameInputPage(bool isDark) {
+    final initials = _nameController.text.trim().isNotEmpty
+        ? _nameController.text
+            .trim()
+            .split(' ')
+            .map((w) => w.isNotEmpty ? w[0].toUpperCase() : '')
+            .take(2)
+            .join()
+        : 'KA';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 16.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(height: 16),
+
+          // Dynamic User Initial / Sacred Avatar Emblem
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppColors.terracottaRed, Color(0xFFD97706)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: AppColors.turmericGold,
+                width: 2.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.terracottaRed.withValues(alpha: 0.3),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Text(
+                initials,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Tag
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppColors.turmericAmber.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'YOUR ARTISAN IDENTITY',
+              style: AppTypography.tagText.copyWith(
+                color: AppColors.turmericAmber,
+                letterSpacing: 1.0,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Title
+          Text(
+            'Welcome to the Sanctuary',
+            style: AppTypography.displayTitle.copyWith(
+              fontSize: 24,
+              color: isDark ? AppColors.textLight : AppColors.textDark,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+
+          Text(
+            'What should we call you on your Kolam journey?',
+            style: AppTypography.bodyText.copyWith(
+              color: isDark ? Colors.white70 : AppColors.textMuted,
+              fontSize: 14,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+
+          // Name Input Field
+          Container(
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.slateCard : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark ? AppColors.borderDark : AppColors.borderLight,
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: TextField(
+              controller: _nameController,
+              autofocus: false,
+              textCapitalization: TextCapitalization.words,
+              style: AppTypography.cardTitle.copyWith(
+                fontSize: 16,
+                color: isDark ? Colors.white : AppColors.textDark,
+              ),
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                hintText: 'Enter your full name (e.g. Sampurna)',
+                hintStyle: AppTypography.bodyText.copyWith(
+                  color: isDark ? Colors.white38 : Colors.grey.shade400,
+                  fontSize: 14,
+                ),
+                prefixIcon: const Icon(Icons.person_outline_rounded, color: AppColors.terracottaRed),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Live Auto-Generated Username Handle Display
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E1B4B) : const Color(0xFFFFF8E1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppColors.turmericGold.withValues(alpha: 0.5),
+                width: 1.0,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.alternate_email_rounded, size: 16, color: AppColors.turmericGold),
+                const SizedBox(width: 6),
+                Text(
+                  'Auto-generated handle: ',
+                  style: AppTypography.caption.copyWith(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.brown.shade700,
+                  ),
+                ),
+                Text(
+                  _generatedUsername,
+                  style: AppTypography.caption.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? AppColors.turmericGold : AppColors.terracottaRed,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
       ),
     );
   }

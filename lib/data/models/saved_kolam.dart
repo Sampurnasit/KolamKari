@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'analysis_result.dart';
+import 'kolam_16_tile.dart';
+import 'kolam_circle_connection.dart';
 
 class SavedKolam {
   final String id;
@@ -6,7 +9,10 @@ class SavedKolam {
   final DateTime createdDate;
   final String canvasStrokeData; // JSON serialized strokes
   final String? thumbnailImage; // optional base64 or placeholder
-  final int gridSize; // 5, 7, 9
+  final int gridSize; // 1 to 9
+  final String orientation; // 'square' or 'diamond'
+  final int colorValue; // Color ARGB int value
+  final String? tileStatesData; // JSON serialized map of dotIndex -> tileMask
   final AnalysisResult? symmetryResult;
   final int complexityScore;
   final String? culturalTag;
@@ -19,6 +25,9 @@ class SavedKolam {
     required this.canvasStrokeData,
     this.thumbnailImage,
     required this.gridSize,
+    this.orientation = 'square',
+    this.colorValue = 0xFFFFFFFF,
+    this.tileStatesData,
     AnalysisResult? symmetryResult,
     AnalysisResult? analysisResult,
     required this.complexityScore,
@@ -31,6 +40,19 @@ class SavedKolam {
 
   bool get isTracedCopy => sourceSampleId != null && sourceSampleId!.isNotEmpty;
 
+  KolamGridOrientation get gridOrientation =>
+      orientation.toLowerCase() == 'diamond' ? KolamGridOrientation.diamond : KolamGridOrientation.square;
+
+  Map<int, Kolam16Tile> get tileStates {
+    if (tileStatesData == null || tileStatesData!.isEmpty) return const {};
+    try {
+      final decoded = jsonDecode(tileStatesData!) as Map<String, dynamic>;
+      return decoded.map((k, v) => MapEntry(int.parse(k), Kolam16Tile(v as int)));
+    } catch (_) {
+      return const {};
+    }
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -39,6 +61,9 @@ class SavedKolam {
       'canvasStrokeData': canvasStrokeData,
       'thumbnailImage': thumbnailImage,
       'gridSize': gridSize,
+      'orientation': orientation,
+      'colorValue': colorValue,
+      'tileStatesData': tileStatesData,
       'symmetryResult': symmetryResult?.toJson(),
       'analysisResult': symmetryResult?.toJson(),
       'complexityScore': complexityScore,
@@ -55,7 +80,10 @@ class SavedKolam {
       createdDate: DateTime.tryParse(map['createdDate'] ?? '') ?? DateTime.now(),
       canvasStrokeData: map['canvasStrokeData'] ?? '[]',
       thumbnailImage: map['thumbnailImage'],
-      gridSize: map['gridSize'] ?? 5,
+      gridSize: map['gridSize'] ?? 4,
+      orientation: map['orientation'] ?? 'square',
+      colorValue: map['colorValue'] ?? 0xFFFFFFFF,
+      tileStatesData: map['tileStatesData'],
       symmetryResult: resultJson != null
           ? AnalysisResult.fromJson(Map<String, dynamic>.from(resultJson))
           : null,
@@ -72,6 +100,9 @@ class SavedKolam {
     String? canvasStrokeData,
     String? thumbnailImage,
     int? gridSize,
+    String? orientation,
+    int? colorValue,
+    String? tileStatesData,
     AnalysisResult? symmetryResult,
     int? complexityScore,
     String? culturalTag,
@@ -84,6 +115,9 @@ class SavedKolam {
       canvasStrokeData: canvasStrokeData ?? this.canvasStrokeData,
       thumbnailImage: thumbnailImage ?? this.thumbnailImage,
       gridSize: gridSize ?? this.gridSize,
+      orientation: orientation ?? this.orientation,
+      colorValue: colorValue ?? this.colorValue,
+      tileStatesData: tileStatesData ?? this.tileStatesData,
       symmetryResult: symmetryResult ?? this.symmetryResult,
       complexityScore: complexityScore ?? this.complexityScore,
       culturalTag: culturalTag ?? this.culturalTag,

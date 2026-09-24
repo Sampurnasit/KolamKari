@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../data/models/user_profile.dart';
@@ -38,6 +38,25 @@ class StorageService {
       _isInitialized = true;
     } catch (e) {
       debugPrint('Error initializing Hive storage: $e');
+    }
+  }
+
+  // --- ONBOARDING STATUS ---
+  bool isOnboardingCompleted() {
+    if (!_isInitialized) return false;
+    try {
+      return (_profileBox.get('onboarding_completed') as bool?) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> setOnboardingCompleted(bool completed) async {
+    if (!_isInitialized) return;
+    try {
+      await _profileBox.put('onboarding_completed', completed);
+    } catch (e) {
+      debugPrint('Error setting onboarding completed: $e');
     }
   }
 
@@ -331,5 +350,26 @@ class StorageService {
     // Sort descending by timestamp
     events.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     return events;
+  }
+
+  // --- THEME MODE ---
+  ThemeMode getThemeMode() {
+    if (!_isInitialized) return ThemeMode.system;
+    final val = _profileBox.get('theme_mode');
+    if (val == 'light') return ThemeMode.light;
+    if (val == 'dark') return ThemeMode.dark;
+    return ThemeMode.system;
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    if (!_isInitialized) return;
+    try {
+      String str = 'system';
+      if (mode == ThemeMode.light) str = 'light';
+      if (mode == ThemeMode.dark) str = 'dark';
+      await _profileBox.put('theme_mode', str);
+    } catch (e) {
+      debugPrint('Error saving theme mode: $e');
+    }
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -6,26 +7,27 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_typography.dart';
 import '../../data/models/saved_kolam.dart';
 import '../../data/models/analysis_result.dart';
+import '../../data/models/kolam_16_tile.dart';
+import '../../data/models/kolam_circle_connection.dart';
 import '../../data/models/kolam_shape_primitive.dart';
 import '../../data/models/sample_kolam_design.dart';
-import '../../data/seed/sample_designs_library.dart';
 import '../../providers/app_providers.dart';
 import '../../services/analysis_service.dart';
 import '../../services/connectivity_graph_service.dart';
 import 'widgets/kolam_canvas_widget.dart';
-import 'widgets/shape_palette_widget.dart';
 import 'widgets/smart_analysis_sheet.dart';
 import 'my_kolams_gallery_screen.dart';
-import 'sample_designs_gallery_screen.dart';
 
-enum StudioBottomTab { draw, dots, tools, ai }
+enum StudioToolMode { joinCircles, freehand, shapes }
 
 class CreateStudioScreen extends ConsumerStatefulWidget {
   final SampleKolamDesign? initialSampleDesign;
+  final SavedKolam? initialSavedKolam;
 
   const CreateStudioScreen({
     super.key,
     this.initialSampleDesign,
+    this.initialSavedKolam,
   });
 
   @override
@@ -33,57 +35,119 @@ class CreateStudioScreen extends ConsumerStatefulWidget {
 }
 
 class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
-  int _gridSize = 5; // 5, 7, 9
-  bool _showDots = true;
-  Color _selectedColor = AppColors.drawingPigments.first;
-  double _strokeWidth = 3.5;
-  SymmetryDrawMode _symmetryMode = SymmetryDrawMode.none;
+  // Grid & Orientation Settings
+  int _gridSize = 4; // 3, 4, 5, 7, 9
+  KolamGridOrientation _gridOrientation = KolamGridOrientation.square; // Default Square grid as in 4x4 reference image
+  final CanvasBackgroundTheme _canvasTheme = CanvasBackgroundTheme.templeSlate; // Charcoal temple slate floor
+  final bool _showDots = true;
 
-  // Freehand drawing state
+  // Active Tool Mode
+  StudioToolMode _toolMode = StudioToolMode.joinCircles;
+
+  // 16-Tile State per Dot (0000 to 1111)
+  final Map<int, Kolam16Tile> _tileStates = {};
+  final List<Map<int, Kolam16Tile>> _tileUndoStack = [];
+  final List<Map<int, Kolam16Tile>> _tileRedoStack = [];
+  Kolam16Tile _activeTilePaletteSelection = const Kolam16Tile(0);
+  int? _selectedCircleIndex;
+
+  // Canvas Palette Colors (Basic White/Black, Red, Green, Yellow, Blue, Brown) with Light/Dark shades
+  KolamPaletteColor _selectedPaletteColor = KolamPaletteColor.basic;
+  Color get _selectedColor {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    try {
+      return _selectedPaletteColor.getShade(isDark);
+    } catch (_) {
+      return isDark ? const Color(0xFFFFFFFF) : const Color(0xFF000000);
+    }
+  }
+  final double _strokeWidth = 3.5;
+  final SymmetryDrawMode _symmetryMode = SymmetryDrawMode.none;
   final List<KolamStroke> _strokes = [];
   final List<KolamStroke> _redoStack = [];
   KolamStroke? _activeStroke;
 
-  // Shape-based construction mode state
-  bool _isShapesMode = false;
+  // Shape-based Construction Mode State
   final List<PlacedKolamShape> _placedShapes = [];
   String? _selectedShapeId;
   Offset? _snapHighlightPoint;
   final KolamConnectivityGraph _connectivityGraph = KolamConnectivityGraph();
 
-  // Ghost Trace Mode state
+  // Ghost Trace Mode State
   SampleKolamDesign? _activeSampleDesign;
   bool _showReferenceLayer = true;
   double _referenceOpacity = 0.35;
 
-  // Shape drag state
+  // Shape Drag State
   Offset? _dragStartShapePos;
   Offset? _dragStartTouchPos;
 
-  StudioBottomTab _activeTab = StudioBottomTab.draw;
+  // Studio AI State
   AnalysisResult? _lastAnalysis;
   bool _isAnalyzing = false;
 
   @override
+  void reassemble() {
+    super.reassemble();
+    _selectedPaletteColor = KolamPaletteColor.basic;
+  }
+
+  @override
   void initState() {
     super.initState();
-    if (widget.initialSampleDesign != null) {
+    if (widget.initialSavedKolam != null) {
+      _loadSavedKolam(widget.initialSavedKolam!, showToast: false);
+    } else if (widget.initialSampleDesign != null) {
       _activeSampleDesign = widget.initialSampleDesign;
       _gridSize = widget.initialSampleDesign!.gridSize;
       _showReferenceLayer = true;
       _referenceOpacity = 0.35;
+      _toolMode = StudioToolMode.freehand;
+    }
+  }
+
+  void _loadSavedKolam(SavedKolam kolam, {bool showToast = true}) {
+    setState(() {
+      _gridSize = kolam.gridSize;
+      _gridOrientation = kolam.gridOrientation;
+      _selectedPaletteColor = KolamPaletteColor.fromColor(Color(kolam.colorValue));
+
+      _tileStates.clear();
+      _tileStates.addAll(kolam.tileStates);
+      _tileUndoStack.clear();
+      _tileRedoStack.clear();
+
+      _strokes.clear();
+      if (kolam.canvasStrokeData.isNotEmpty) {
+        try {
+          final list = jsonDecode(kolam.canvasStrokeData) as List;
+          _strokes.addAll(list.map((item) => KolamStroke.fromJson(Map<String, dynamic>.from(item))));
+        } catch (_) {}
+      }
+      _redoStack.clear();
+
+      _placedShapes.clear();
+      _lastAnalysis = kolam.analysisResult;
+      _activeSampleDesign = null;
+      _toolMode = StudioToolMode.joinCircles;
+    });
+
+    if (showToast && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.tulsiGreen,
+          content: Text('Loaded "${kolam.name}" into Canvas!'),
+        ),
+      );
     }
   }
 
   List<Offset> _getGridDots(double canvasSize) {
-    final step = canvasSize / (_gridSize + 1);
-    final dots = <Offset>[];
-    for (int r = 1; r <= _gridSize; r++) {
-      for (int c = 1; c <= _gridSize; c++) {
-        dots.add(Offset(c * step, r * step));
-      }
-    }
-    return dots;
+    return KolamGridLayout.generateDots(
+      canvasSize: canvasSize,
+      gridSize: _gridSize,
+      orientation: _gridOrientation,
+    );
   }
 
   void _rebuildConnectivityGraph() {
@@ -94,11 +158,112 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
     );
   }
 
-  // --- Pan handling for Freehand vs Shapes Mode ---
+  // --- 16-Tile & Circle Joining Logic ---
+
+  void _saveTileUndoSnapshot() {
+    _tileUndoStack.add(Map.from(_tileStates));
+    _tileRedoStack.clear();
+  }
+
+  /// Toggles connection between circle A and B by updating their facing 16-tile corner bits
+  void _toggleJoinCircles(int fromIndex, int toIndex) {
+    final dots = _getGridDots(350.0);
+    if (fromIndex >= dots.length || toIndex >= dots.length) return;
+
+    final pA = dots[fromIndex];
+    final pB = dots[toIndex];
+    final delta = pB - pA;
+
+    // Determine relative direction:
+    // South (0): dy > |dx|
+    // West (1): -dx > |dy|
+    // North (2): -dy > |dx|
+    // East (3): dx > |dy|
+    int bitFrom;
+    int bitTo;
+    if (delta.dy.abs() >= delta.dx.abs()) {
+      if (delta.dy > 0) {
+        bitFrom = 0; // South
+        bitTo = 2;   // North
+      } else {
+        bitFrom = 2; // North
+        bitTo = 0;   // South
+      }
+    } else {
+      if (delta.dx > 0) {
+        bitFrom = 3; // East
+        bitTo = 1;   // West
+      } else {
+        bitFrom = 1; // West
+        bitTo = 3;   // East
+      }
+    }
+
+    setState(() {
+      _saveTileUndoSnapshot();
+
+      final currentTileA = _tileStates[fromIndex] ?? Kolam16Tile.circle;
+      final currentTileB = _tileStates[toIndex] ?? Kolam16Tile.circle;
+
+      final isAlreadyConnected = currentTileA.mask & (1 << bitFrom) != 0 &&
+          currentTileB.mask & (1 << bitTo) != 0;
+
+      if (isAlreadyConnected) {
+        // Disconnect both tips
+        _tileStates[fromIndex] = currentTileA.setBit(bitFrom, false);
+        _tileStates[toIndex] = currentTileB.setBit(bitTo, false);
+      } else {
+        // Connect both tips towards each other
+        _tileStates[fromIndex] = currentTileA.setBit(bitFrom, true);
+        _tileStates[toIndex] = currentTileB.setBit(bitTo, true);
+      }
+
+      _selectedCircleIndex = toIndex;
+      _activeTilePaletteSelection = _tileStates[toIndex] ?? Kolam16Tile.circle;
+    });
+
+    _rebuildConnectivityGraph();
+  }
+
+  void _onCircleTapped(int dotIndex, int? quadrantBit) {
+    if (_toolMode == StudioToolMode.joinCircles) {
+      if (quadrantBit != null) {
+        // Tapped a specific corner/quadrant: toggle that 1-bit point!
+        setState(() {
+          _saveTileUndoSnapshot();
+          final current = _tileStates[dotIndex] ?? Kolam16Tile.circle;
+          final updated = current.toggleBit(quadrantBit);
+          _tileStates[dotIndex] = updated;
+          _activeTilePaletteSelection = updated;
+          _selectedCircleIndex = dotIndex;
+        });
+      } else {
+        // Tapped center of circle: select or cycle
+        setState(() {
+          if (_selectedCircleIndex == null) {
+            _selectedCircleIndex = dotIndex;
+            _activeTilePaletteSelection = _tileStates[dotIndex] ?? Kolam16Tile.circle;
+          } else if (_selectedCircleIndex == dotIndex) {
+            // Cycle tile shape
+            _saveTileUndoSnapshot();
+            final current = _tileStates[dotIndex] ?? Kolam16Tile.circle;
+            final nextMask = (current.mask + 1) % 16;
+            final updated = Kolam16Tile(nextMask);
+            _tileStates[dotIndex] = updated;
+            _activeTilePaletteSelection = updated;
+          } else {
+            // Join previously selected circle to this circle
+            _toggleJoinCircles(_selectedCircleIndex!, dotIndex);
+          }
+        });
+      }
+    }
+  }
+
+  // --- Canvas Gestures (Pan & Drag) ---
 
   void _onCanvasPanStart(Offset point) {
-    if (_isShapesMode) {
-      // Find if touch hit any placed shape
+    if (_toolMode == StudioToolMode.shapes) {
       PlacedKolamShape? hitShape;
       for (final shape in _placedShapes.reversed) {
         if ((shape.position - point).distance <= (shape.size * 0.7)) {
@@ -118,7 +283,7 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
           _dragStartTouchPos = null;
         }
       });
-    } else {
+    } else if (_toolMode == StudioToolMode.freehand) {
       setState(() {
         _redoStack.clear();
         _activeStroke = KolamStroke(
@@ -127,11 +292,21 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
           strokeWidth: _strokeWidth,
         );
       });
+    } else if (_toolMode == StudioToolMode.joinCircles) {
+      final dots = _getGridDots(350.0);
+      final ringRadius = KolamGridLayout.getRingRadius(350.0, _gridSize, _gridOrientation);
+      final hit = KolamGridLayout.findHitCircleDot(tapPos: point, dots: dots, ringRadius: ringRadius);
+      if (hit != null) {
+        setState(() {
+          _selectedCircleIndex = hit;
+          _activeTilePaletteSelection = _tileStates[hit] ?? Kolam16Tile.circle;
+        });
+      }
     }
   }
 
   void _onCanvasPanUpdate(Offset point) {
-    if (_isShapesMode) {
+    if (_toolMode == StudioToolMode.shapes) {
       if (_selectedShapeId != null && _dragStartShapePos != null && _dragStartTouchPos != null) {
         final delta = point - _dragStartTouchPos!;
         final tentativePos = _dragStartShapePos! + delta;
@@ -140,7 +315,6 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
           final oldShape = _placedShapes[index];
           final movedShape = oldShape.copyWith(position: tentativePos);
 
-          // Live magnetic snap check against grid dots and other shape anchors
           final dots = _getGridDots(350.0);
           final snap = _connectivityGraph.evaluateSnap(
             shape: movedShape,
@@ -158,7 +332,7 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
           });
         }
       }
-    } else {
+    } else if (_toolMode == StudioToolMode.freehand) {
       if (_activeStroke == null) return;
       setState(() {
         final updatedPoints = List<KolamPoint>.from(_activeStroke!.points)
@@ -170,17 +344,24 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
           strokeWidth: _strokeWidth,
         );
       });
+    } else if (_toolMode == StudioToolMode.joinCircles) {
+      final dots = _getGridDots(350.0);
+      final ringRadius = KolamGridLayout.getRingRadius(350.0, _gridSize, _gridOrientation);
+      final hit = KolamGridLayout.findHitCircleDot(tapPos: point, dots: dots, ringRadius: ringRadius);
+      if (hit != null && _selectedCircleIndex != null && hit != _selectedCircleIndex) {
+        _toggleJoinCircles(_selectedCircleIndex!, hit);
+      }
     }
   }
 
   void _onCanvasPanEnd() {
-    if (_isShapesMode) {
+    if (_toolMode == StudioToolMode.shapes) {
       _dragStartShapePos = null;
       _dragStartTouchPos = null;
       _snapHighlightPoint = null;
       _rebuildConnectivityGraph();
       setState(() {});
-    } else {
+    } else if (_toolMode == StudioToolMode.freehand) {
       if (_activeStroke == null || _activeStroke!.points.isEmpty) return;
 
       setState(() {
@@ -195,7 +376,7 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
     }
   }
 
-  // --- Shape Placement, Manipulation & Topology ---
+  // --- Shape Placement & Manipulation ---
 
   void _onShapeDropped(KolamShapePrimitive primitive, Offset dropOffset) {
     final id = const Uuid().v4();
@@ -210,7 +391,6 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
       strokeWidth: _strokeWidth,
     );
 
-    // Initial snap check
     final dots = _getGridDots(350.0);
     final snap = _connectivityGraph.evaluateSnap(
       shape: newShape,
@@ -236,7 +416,6 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
   }
 
   void _onShapeSelectedFromPalette(KolamShapePrimitive primitive) {
-    // Tapping palette places the primitive in canvas center or stepped offset
     final center = const Offset(175, 175);
     final stepOffset = _placedShapes.isEmpty
         ? Offset.zero
@@ -309,54 +488,96 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
     return results;
   }
 
+  // --- Grid Stepper Methods ---
+
+  bool get _canDecreaseGrid {
+    return _gridSize > 1;
+  }
+
+  bool get _canIncreaseGrid {
+    return _gridSize < 9;
+  }
+
+  void _decreaseGrid() {
+    if (!_canDecreaseGrid) return;
+    setState(() {
+      _saveTileUndoSnapshot();
+      if (_gridOrientation == KolamGridOrientation.square) {
+        _gridSize = max(1, _gridSize - 1);
+      } else {
+        _gridSize = max(1, _gridSize - 2);
+      }
+      _tileStates.clear();
+      _selectedCircleIndex = null;
+    });
+    _rebuildConnectivityGraph();
+  }
+
+  void _increaseGrid() {
+    if (!_canIncreaseGrid) return;
+    setState(() {
+      _saveTileUndoSnapshot();
+      if (_gridOrientation == KolamGridOrientation.square) {
+        _gridSize = min(9, _gridSize + 1);
+      } else {
+        _gridSize = min(9, _gridSize + 2);
+      }
+      _tileStates.clear();
+      _selectedCircleIndex = null;
+    });
+    _rebuildConnectivityGraph();
+  }
+
+  // --- Undo / Redo / Clear ---
+
+  bool get _canUndo => _tileUndoStack.isNotEmpty || _tileStates.isNotEmpty;
+
+  bool get _canRedo => _tileRedoStack.isNotEmpty;
+
   void _undo() {
-    if (_isShapesMode) {
-      if (_placedShapes.isNotEmpty) {
-        setState(() {
-          final removed = _placedShapes.removeLast();
-          if (_selectedShapeId == removed.id) {
-            _selectedShapeId = null;
-          }
-        });
-        _rebuildConnectivityGraph();
-      }
-    } else {
-      if (_strokes.isNotEmpty) {
-        setState(() {
-          _redoStack.add(_strokes.removeLast());
-        });
-      }
+    if (_tileUndoStack.isNotEmpty) {
+      setState(() {
+        _tileRedoStack.add(Map.from(_tileStates));
+        _tileStates.clear();
+        _tileStates.addAll(_tileUndoStack.removeLast());
+      });
+    } else if (_tileStates.isNotEmpty) {
+      setState(() {
+        _tileRedoStack.add(Map.from(_tileStates));
+        _tileStates.clear();
+      });
     }
+    _rebuildConnectivityGraph();
   }
 
   void _redo() {
-    if (!_isShapesMode && _redoStack.isNotEmpty) {
+    if (_tileRedoStack.isNotEmpty) {
       setState(() {
-        _strokes.add(_redoStack.removeLast());
+        _tileUndoStack.add(Map.from(_tileStates));
+        _tileStates.clear();
+        _tileStates.addAll(_tileRedoStack.removeLast());
       });
+      _rebuildConnectivityGraph();
     }
   }
 
   void _clear() {
-    if (_strokes.isEmpty && _placedShapes.isEmpty) return;
+    if (_tileStates.isEmpty) return;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Clear Canvas?'),
-        content: const Text('Are you sure you want to erase all current Kolam lines and placed shapes?'),
+        content: const Text('Are you sure you want to reset all tiles to pure circles?'),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
               Navigator.of(ctx).pop();
               setState(() {
-                _strokes.clear();
-                _placedShapes.clear();
-                _selectedShapeId = null;
-                _redoStack.clear();
-                _activeStroke = null;
+                _saveTileUndoSnapshot();
+                _tileStates.clear();
+                _selectedCircleIndex = null;
                 _lastAnalysis = null;
-                _snapHighlightPoint = null;
               });
               _rebuildConnectivityGraph();
             },
@@ -367,12 +588,40 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
     );
   }
 
+  // --- Smart AI Analysis & Saving ---
+
+  List<KolamStroke> _getAllStrokes() {
+    final dots = _getGridDots(350.0);
+    final rowCount = _gridOrientation == KolamGridOrientation.square
+        ? _gridSize
+        : KolamGridLayout.getDiamondRowCounts(_gridSize).length;
+    final step = 350.0 / (rowCount + 1);
+    final ringRadius = KolamGridLayout.getRingRadius(350.0, _gridSize, _gridOrientation);
+    final pointDistance = step * 0.50;
+
+    // Convert 16-tile shapes to strokes
+    final tileStrokes = <KolamStroke>[];
+    for (int i = 0; i < dots.length; i++) {
+      final tile = _tileStates[i] ?? Kolam16Tile.circle;
+      tileStrokes.add(tile.toStroke(
+        center: dots[i],
+        ringRadius: ringRadius,
+        pointDistance: pointDistance,
+        color: _selectedColor,
+        strokeWidth: _strokeWidth,
+      ));
+    }
+
+    final placedStrokes = _placedShapes.map((s) => s.toStroke()).toList();
+    return [..._strokes, ...tileStrokes, ...placedStrokes];
+  }
+
   Future<void> _runSmartAnalysis() async {
-    final allStrokes = [..._strokes, ..._placedShapes.map((s) => s.toStroke())];
+    final allStrokes = _getAllStrokes();
 
     if (allStrokes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Draw lines or place primitives on the canvas to analyze sacred geometry.')),
+        const SnackBar(content: Text('Create or customize tile shapes on the canvas to analyze sacred geometry.')),
       );
       return;
     }
@@ -383,7 +632,7 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
 
     final analyzer = ref.read(analysisServiceProvider);
     final data = KolamData(
-      strokes: _strokes,
+      strokes: allStrokes,
       placedShapes: _placedShapes,
       connectivityGraph: _connectivityGraph,
       gridSize: _gridSize,
@@ -392,7 +641,6 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
 
     final result = await analyzer.analyze(data);
 
-    // Call GamificationService.awardXp(30, "Analyse Kolam")
     final gamification = ref.read(gamificationServiceProvider);
     await gamification.awardXp(30, 'Analyse Kolam');
     ref.read(userProfileProvider.notifier).refresh();
@@ -437,167 +685,14 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
     }
   }
 
-  void _openSampleGallery() async {
-    final selected = await Navigator.of(context).push<SampleKolamDesign>(
-      MaterialPageRoute(
-        builder: (_) => SampleDesignsGalleryScreen(
-          onSelectSample: (design) {
-            _loadSampleDesign(design);
-          },
-        ),
-      ),
-    );
-    if (selected != null && mounted) {
-      _loadSampleDesign(selected);
-    }
-  }
-
-  void _loadSampleDesign(SampleKolamDesign design) {
-    if (_strokes.isNotEmpty || _placedShapes.isNotEmpty) {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Start Tracing Pattern?'),
-          content: Text(
-            'Load "${design.name}" as reference? Canvas will adjust to ${design.gridSize}x${design.gridSize} pulli grid.',
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                setState(() {
-                  _activeSampleDesign = design;
-                  _gridSize = design.gridSize;
-                  _showReferenceLayer = true;
-                  _referenceOpacity = 0.35;
-                  _strokes.clear();
-                  _placedShapes.clear();
-                  _selectedShapeId = null;
-                  _redoStack.clear();
-                  _activeStroke = null;
-                  _lastAnalysis = null;
-                  _snapHighlightPoint = null;
-                });
-                _rebuildConnectivityGraph();
-              },
-              child: const Text('Start Tracing'),
-            ),
-          ],
-        ),
-      );
-    } else {
-      setState(() {
-        _activeSampleDesign = design;
-        _gridSize = design.gridSize;
-        _showReferenceLayer = true;
-        _referenceOpacity = 0.35;
-      });
-      _rebuildConnectivityGraph();
-    }
-  }
-
-  void _checkTracingAccuracy() async {
-    if (_activeSampleDesign == null) return;
-
-    final userStrokes = [..._strokes, ..._connectivityGraph.getMergedStrokes()];
-    final result = SampleDesignsLibrary.evaluateTracingMatch(
-      userStrokes: userStrokes,
-      targetStrokes: _activeSampleDesign!.strokes,
-    );
-
-    if (result.awardedXP > 0) {
-      await ref.read(userProfileProvider.notifier).awardXp(
-            result.awardedXP,
-            'Traced ${_activeSampleDesign!.name}',
-          );
-    }
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.fact_check_rounded, color: AppColors.turmericAmber),
-            const SizedBox(width: 8),
-            const Text('Tracing Accuracy'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.terracottaRed.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  '${result.matchPercentage}%',
-                  style: AppTypography.displayTitle.copyWith(
-                    color: AppColors.terracottaRed,
-                    fontSize: 32,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              result.feedback,
-              style: AppTypography.bodyText.copyWith(fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Coverage:', style: AppTypography.caption),
-                Text(
-                  '${(result.coverageRatio * 100).round()}% points traced',
-                  style: AppTypography.tagText,
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Reward:', style: AppTypography.caption),
-                Text(
-                  '+${result.awardedXP} XP',
-                  style: AppTypography.tagText.copyWith(color: AppColors.tulsiGreen),
-                ),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Continue Tracing'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _promptSaveKolam(_lastAnalysis);
-            },
-            child: const Text('Save Kolam'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _promptSaveKolam([AnalysisResult? analysis]) {
-    final mergedShapeStrokes = _connectivityGraph.getMergedStrokes();
-    final allStrokes = [..._strokes, ...mergedShapeStrokes];
+    final allStrokes = _getAllStrokes();
+    final nonCircleTiles = _tileStates.values.where((t) => t.mask != 0).length;
+    final hasContent = nonCircleTiles > 0 || _strokes.isNotEmpty || _placedShapes.isNotEmpty || _activeSampleDesign != null;
 
-    if (allStrokes.isEmpty) {
+    if (!hasContent) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot save an empty canvas!')),
+        const SnackBar(content: Text('Cannot save an empty canvas! Draw or tap nodes to create your Kolam.')),
       );
       return;
     }
@@ -605,11 +700,13 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
     final isTraced = _activeSampleDesign != null;
     final defaultName = isTraced
         ? 'Traced ${_activeSampleDesign!.name}'
-        : (_isShapesMode ? 'Kolam ${_placedShapes.length} Primitives' : 'Kolam ${allStrokes.length} Strokes');
+        : (nonCircleTiles > 0
+            ? '${_gridOrientation == KolamGridOrientation.diamond ? "Diamond" : "Square"} ${_gridSize}x$_gridSize Sikku ($nonCircleTiles Nodes)'
+            : 'Kolam ${allStrokes.length} Strokes');
 
     final culturalTag = isTraced
         ? 'Traced: ${_activeSampleDesign!.name}'
-        : (_isShapesMode ? 'Constructed Kolam Primitives' : 'Original Studio Creation');
+        : (_gridOrientation == KolamGridOrientation.diamond ? 'Diamond Sikku Kolam' : 'Square 16-Tile Sikku Kolam');
 
     final nameController = TextEditingController(text: defaultName);
 
@@ -621,7 +718,7 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
           controller: nameController,
           decoration: const InputDecoration(
             labelText: 'Kolam Name',
-            hintText: 'e.g. Morning Lotus Sikku',
+            hintText: 'e.g. 16-Tile Sikku Lotus',
           ),
         ),
         actions: [
@@ -630,7 +727,8 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
             onPressed: () async {
               Navigator.of(ctx).pop();
               final id = const Uuid().v4();
-              final strokeJson = jsonEncode(allStrokes.map((s) => s.toJson()).toList());
+              final strokeJson = jsonEncode(_strokes.map((s) => s.toJson()).toList());
+              final tileStatesJson = jsonEncode(_tileStates.map((k, v) => MapEntry(k.toString(), v.mask)));
 
               final newKolam = SavedKolam(
                 id: id,
@@ -638,10 +736,13 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
                 createdDate: DateTime.now(),
                 canvasStrokeData: strokeJson,
                 gridSize: _gridSize,
-                complexityScore: analysis?.complexityScore ?? _lastAnalysis?.complexityScore ?? (allStrokes.length * 5).clamp(10, 85),
+                orientation: _gridOrientation.name,
+                colorValue: _selectedColor.toARGB32(),
+                tileStatesData: tileStatesJson,
+                complexityScore: analysis?.complexityScore ?? _lastAnalysis?.complexityScore ?? (nonCircleTiles * 6 + 20).clamp(20, 95),
                 symmetryResult: analysis ?? _lastAnalysis,
                 culturalTag: culturalTag,
-                sourceSampleId: isTraced ? _activeSampleDesign!.id : null, // Distinct from original freehand
+                sourceSampleId: isTraced ? _activeSampleDesign!.id : null,
               );
 
               await ref.read(savedKolamsProvider.notifier).save(newKolam);
@@ -655,7 +756,7 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
                   SnackBar(
                     backgroundColor: AppColors.tulsiGreen,
                     content: Text(
-                      isTraced ? 'Traced Kolam Saved! (+40 XP)' : 'Original Kolam Saved! (+40 XP)',
+                      isTraced ? 'Traced Kolam Saved! (+40 XP)' : 'Original 16-Tile Kolam Saved! (+40 XP)',
                     ),
                   ),
                 );
@@ -668,6 +769,27 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
     );
   }
 
+  String _formatSymmetryName(SymmetryType type) {
+    switch (type) {
+      case SymmetryType.dihedralD4:
+        return '4-Fold Mandala (D4)';
+      case SymmetryType.twoFoldReflection:
+        return '2-Fold Biharmonic (D2)';
+      case SymmetryType.fourFoldReflection:
+        return '4-Fold Reflection';
+      case SymmetryType.rotational90:
+        return '4-Fold Swirl (C4)';
+      case SymmetryType.rotational180:
+        return '2-Fold Rotational (C2)';
+      case SymmetryType.bilateralReflection:
+        return 'Bilateral Mirror';
+      case SymmetryType.none:
+        return 'Organic Freeform';
+    }
+  }
+
+  // --- UI Builders ---
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -678,31 +800,24 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
         title: const Text('Kolam Creative Studio'),
         actions: [
           IconButton(
-            tooltip: 'Sample Designs Gallery',
-            icon: const Icon(Icons.auto_stories_rounded),
-            onPressed: _openSampleGallery,
-          ),
-          IconButton(
-            tooltip: 'My Kolams Gallery',
+            tooltip: 'Saved Kolams',
             icon: const Icon(Icons.collections_bookmark_rounded),
-            onPressed: () {
-              Navigator.of(context).push(
+            onPressed: () async {
+              final selectedKolam = await Navigator.of(context).push<SavedKolam>(
                 MaterialPageRoute(builder: (_) => const MyKolamsGalleryScreen()),
               );
+              if (selectedKolam != null && mounted) {
+                _loadSavedKolam(selectedKolam);
+              }
             },
-          ),
-          IconButton(
-            tooltip: 'Save Kolam',
-            icon: const Icon(Icons.save_alt_rounded),
-            onPressed: () => _promptSaveKolam(_lastAnalysis),
           ),
         ],
       ),
       body: Column(
         children: [
-          // Top Controls Bar (Undo/Redo/Clear + Mode Switch + Mirror Toggle/Graph Badge)
+          // Top Action Toolbar (Undo / Redo on left, Grid Stepper in middle, Clear Canvas in Red on right)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
               color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
               border: Border(
@@ -711,182 +826,105 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
                 ),
               ),
             ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  // Undo / Redo / Clear
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.all(6),
-                        constraints: const BoxConstraints(),
-                        icon: const Icon(Icons.undo_rounded, size: 20),
-                        tooltip: 'Undo',
-                        onPressed: (_isShapesMode ? _placedShapes.isNotEmpty : _strokes.isNotEmpty)
-                            ? _undo
-                            : null,
-                      ),
-                      const SizedBox(width: 4),
-                      if (!_isShapesMode) ...[
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.all(6),
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.redo_rounded, size: 20),
-                          tooltip: 'Redo',
-                          onPressed: _redoStack.isNotEmpty ? _redo : null,
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.all(6),
-                        constraints: const BoxConstraints(),
-                        icon: const Icon(Icons.delete_sweep_rounded, size: 20),
-                        tooltip: 'Clear',
-                        onPressed: (_strokes.isNotEmpty || _placedShapes.isNotEmpty) ? _clear : null,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 10),
+            child: Row(
+              children: [
+                // Left: Undo / Redo
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(6),
+                  constraints: const BoxConstraints(),
+                  icon: const Icon(Icons.undo_rounded, size: 20),
+                  tooltip: 'Undo',
+                  onPressed: _canUndo ? _undo : null,
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(6),
+                  constraints: const BoxConstraints(),
+                  icon: const Icon(Icons.redo_rounded, size: 20),
+                  tooltip: 'Redo',
+                  onPressed: _canRedo ? _redo : null,
+                ),
 
-                  // Mode Switch Segmented Pill: [ ✏️ Freehand | 🧩 Shapes ]
-                  Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: isDark ? AppColors.slateLight : AppColors.borderLight,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: isDark ? AppColors.borderDark : AppColors.borderLight,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildModePill(
-                          label: 'Freehand',
-                          icon: Icons.edit_rounded,
-                          isSelected: !_isShapesMode,
-                          onTap: () {
-                            setState(() {
-                              _isShapesMode = false;
-                              _selectedShapeId = null;
-                            });
-                          },
-                        ),
-                        _buildModePill(
-                          label: 'Shapes',
-                          icon: Icons.category_rounded,
-                          isSelected: _isShapesMode,
-                          onTap: () {
-                            setState(() {
-                              _isShapesMode = true;
-                            });
-                          },
-                        ),
-                      ],
+                const Spacer(),
+
+                // Middle: Interactive Grid Stepper with + and - buttons
+                Text(
+                  'Grid: ',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white70 : AppColors.textMuted,
+                  ),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                  icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
+                  tooltip: _gridOrientation == KolamGridOrientation.square
+                      ? 'Decrease Grid (-1)'
+                      : 'Decrease Diamond Grid (-2)',
+                  color: _canDecreaseGrid
+                      ? (isDark ? Colors.white : AppColors.terracottaRed)
+                      : (isDark ? Colors.white24 : Colors.black26),
+                  onPressed: _canDecreaseGrid ? _decreaseGrid : null,
+                ),
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.slateLight : AppColors.borderLight,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isDark ? AppColors.borderDark : AppColors.borderLight,
                     ),
                   ),
-                  const SizedBox(width: 10),
-
-                  // Right side control: Live Mirror Symmetry (in Freehand) or Snap Topology Badge (in Shapes)
-                  if (!_isShapesMode)
-                    PopupMenuButton<SymmetryDrawMode>(
-                      initialValue: _symmetryMode,
-                      tooltip: 'Live Mirror Symmetry Mode',
-                      onSelected: (mode) => setState(() => _symmetryMode = mode),
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: SymmetryDrawMode.none,
-                          child: Text('Mirror: Off (Freehand)'),
-                        ),
-                        const PopupMenuItem(
-                          value: SymmetryDrawMode.bilateralVertical,
-                          child: Text('Mirror: 2-Axis (Vertical)'),
-                        ),
-                        const PopupMenuItem(
-                          value: SymmetryDrawMode.bilateralHorizontal,
-                          child: Text('Mirror: 2-Axis (Horizontal)'),
-                        ),
-                        const PopupMenuItem(
-                          value: SymmetryDrawMode.fourFoldRadial,
-                          child: Text('Mirror: 4-Axis (Mandala)'),
-                        ),
-                      ],
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _symmetryMode != SymmetryDrawMode.none
-                              ? AppColors.turmericGold.withValues(alpha: 0.2)
-                              : (isDark ? AppColors.slateLight : AppColors.borderLight),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: _symmetryMode != SymmetryDrawMode.none
-                                ? AppColors.turmericGold
-                                : Colors.transparent,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.flip_rounded,
-                              size: 16,
-                              color: _symmetryMode != SymmetryDrawMode.none
-                                  ? AppColors.turmericGold
-                                  : AppColors.textMuted,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              _symmetryMode == SymmetryDrawMode.none
-                                  ? 'Mirror: Off'
-                                  : _symmetryMode == SymmetryDrawMode.fourFoldRadial
-                                      ? '4-Axis'
-                                      : '2-Axis',
-                              style: AppTypography.tagText.copyWith(
-                                color: _symmetryMode != SymmetryDrawMode.none
-                                    ? AppColors.turmericGold
-                                    : AppColors.textMuted,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  else
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppColors.turmericAmber.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.turmericAmber.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.all_inclusive_rounded, size: 14, color: AppColors.turmericAmber),
-                          const SizedBox(width: 5),
-                          Text(
-                            '${_connectivityGraph.countClosedLoops()} Loops',
-                            style: AppTypography.tagText.copyWith(
-                              color: AppColors.turmericAmber,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
+                  child: Text(
+                    '${_gridSize}x$_gridSize',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: isDark ? Colors.white : AppColors.textDark,
                     ),
-                ],
-              ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                  icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
+                  tooltip: _gridOrientation == KolamGridOrientation.square
+                      ? 'Increase Grid (+1)'
+                      : 'Increase Diamond Grid (+2)',
+                  color: _canIncreaseGrid
+                      ? (isDark ? Colors.white : AppColors.terracottaRed)
+                      : (isDark ? Colors.white24 : Colors.black26),
+                  onPressed: _canIncreaseGrid ? _increaseGrid : null,
+                ),
+
+                const Spacer(),
+
+                // Rightmost: Clear Canvas (in RED)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(6),
+                  constraints: const BoxConstraints(),
+                  icon: Icon(
+                    Icons.delete_sweep_rounded,
+                    size: 20,
+                    color: _tileStates.isNotEmpty
+                        ? Colors.redAccent
+                        : (isDark ? Colors.redAccent.withValues(alpha: 0.35) : Colors.red.withValues(alpha: 0.35)),
+                  ),
+                  tooltip: 'Clear Canvas',
+                  onPressed: _tileStates.isNotEmpty ? _clear : null,
+                ),
+              ],
             ),
           ),
-
-          // Trace Mode Reference Layer Control Header Bar (when active)
-          if (_activeSampleDesign != null)
-            _buildTraceModeBanner(isDark),
 
           // Central Canvas Area
           Expanded(
@@ -897,11 +935,16 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
                 children: [
                   KolamCanvasWidget(
                     gridSize: _gridSize,
+                    orientation: _gridOrientation,
                     showDots: _showDots,
+                    canvasTheme: _canvasTheme,
+                    kolamColor: _selectedColor,
+                    tileStates: _tileStates,
                     strokes: _strokes,
                     activeStroke: _activeStroke,
                     symmetryMode: _symmetryMode,
-                    isShapesMode: _isShapesMode,
+                    selectedCircleIndex: _selectedCircleIndex,
+                    isShapesMode: _toolMode == StudioToolMode.shapes,
                     placedShapes: _placedShapes,
                     selectedShapeId: _selectedShapeId,
                     snapHighlightPoint: _snapHighlightPoint,
@@ -911,6 +954,8 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
                     onPanStart: _onCanvasPanStart,
                     onPanUpdate: _onCanvasPanUpdate,
                     onPanEnd: _onCanvasPanEnd,
+                    onJoinCircles: _toggleJoinCircles,
+                    onCircleTapped: _onCircleTapped,
                     onShapeDropped: _onShapeDropped,
                     onShapeSelected: (id) => setState(() => _selectedShapeId = id),
                     onShapeRotated: _onShapeRotated,
@@ -933,23 +978,28 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
                         ),
                       ),
                     ),
+
+                  // Green Floating Button for Download / Save option
+                  Positioned(
+                    bottom: 8,
+                    right: 8,
+                    child: FloatingActionButton(
+                      heroTag: 'download_kolam_btn',
+                      backgroundColor: AppColors.tulsiGreen,
+                      foregroundColor: Colors.white,
+                      tooltip: 'Download Kolam',
+                      onPressed: () => _promptSaveKolam(_lastAnalysis),
+                      child: const Icon(Icons.download_rounded, size: 26),
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
 
-          // Shape Palette (visible in Shapes mode)
-          if (_isShapesMode)
-            ShapePaletteWidget(
-              onShapeSelected: _onShapeSelectedFromPalette,
-              isDark: isDark,
-            ),
-
-          // Bottom Tool Control Panel (Pigment Selector / Dots Grid / Stroke Slider)
-          _buildToolTabPanel(isDark),
-
-          // Bottom Tabs (Draw / Dots / Tools / AI ✨)
+          // Bottom Control Bar: Color Palette & Layout Selector
           Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
               border: Border(
@@ -958,617 +1008,142 @@ class _CreateStudioScreenState extends ConsumerState<CreateStudioScreen> {
                 ),
               ),
             ),
-            child: Row(
-              children: [
-                _buildTabButton(
-                  tab: StudioBottomTab.draw,
-                  label: 'Pigments',
-                  icon: Icons.palette_rounded,
-                ),
-                _buildTabButton(
-                  tab: StudioBottomTab.dots,
-                  label: 'Grid Pulli',
-                  icon: Icons.grid_4x4_rounded,
-                ),
-                _buildTabButton(
-                  tab: StudioBottomTab.tools,
-                  label: 'Stroke',
-                  icon: Icons.line_weight_rounded,
-                ),
-                _buildTabButton(
-                  tab: StudioBottomTab.ai,
-                  label: 'AI ✨',
-                  icon: Icons.auto_awesome_rounded,
-                  highlight: true,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildModePill({
-    required String label,
-    required IconData icon,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.terracottaRed : Colors.transparent,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: AppColors.terracottaRed.withValues(alpha: 0.35),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 14,
-              color: isSelected ? Colors.white : AppColors.textMuted,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: AppTypography.tagText.copyWith(
-                color: isSelected ? Colors.white : AppColors.textMuted,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                fontSize: 11.5,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabButton({
-    required StudioBottomTab tab,
-    required String label,
-    required IconData icon,
-    bool highlight = false,
-  }) {
-    final isSelected = _activeTab == tab;
-
-    return Expanded(
-      child: InkWell(
-        onTap: () {
-          setState(() => _activeTab = tab);
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(
-                color: isSelected
-                    ? (highlight ? AppColors.turmericGold : AppColors.terracottaRed)
-                    : Colors.transparent,
-                width: 2.5,
-              ),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 20,
-                color: isSelected
-                    ? (highlight ? AppColors.turmericGold : AppColors.terracottaRed)
-                    : (highlight ? AppColors.turmericAmber : AppColors.textMuted),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                label,
-                style: AppTypography.caption.copyWith(
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: isSelected
-                      ? (highlight ? AppColors.turmericGold : AppColors.terracottaRed)
-                      : (highlight ? AppColors.turmericAmber : AppColors.textMuted),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildToolTabPanel(bool isDark) {
-    if (_activeTab == StudioBottomTab.dots) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        color: isDark ? AppColors.slateDark : AppColors.riceFlourBg,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              Text('Grid Pulli:', style: AppTypography.cardTitle.copyWith(fontSize: 13)),
-              const SizedBox(width: 12),
-              ...[5, 7, 9].map((size) {
-                final isSel = _gridSize == size;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: ChoiceChip(
-                    label: Text('${size}x$size'),
-                    selected: isSel,
-                    onSelected: (val) {
-                      if (val) {
-                        setState(() => _gridSize = size);
-                        _rebuildConnectivityGraph();
-                      }
-                    },
-                  ),
-                );
-              }),
-              const SizedBox(width: 16),
-              IconButton(
-                icon: Icon(_showDots ? Icons.visibility_rounded : Icons.visibility_off_rounded),
-                tooltip: _showDots ? 'Hide Grid Dots' : 'Show Grid Dots',
-                onPressed: () => setState(() => _showDots = !_showDots),
-              ),
-            ],
-          ),
-        ),
-      );
-    } else if (_activeTab == StudioBottomTab.tools) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        color: isDark ? AppColors.slateDark : AppColors.riceFlourBg,
-        child: Row(
-          children: [
-            Text('Stroke: ', style: AppTypography.cardTitle.copyWith(fontSize: 13)),
-            Expanded(
-              child: Slider(
-                value: _strokeWidth,
-                min: 1.5,
-                max: 8.0,
-                divisions: 6,
-                activeColor: AppColors.terracottaRed,
-                label: '${_strokeWidth.toStringAsFixed(1)}px',
-                onChanged: (val) {
-                  setState(() {
-                    _strokeWidth = val;
-                    if (_isShapesMode && _selectedShapeId != null) {
-                      final idx = _placedShapes.indexWhere((s) => s.id == _selectedShapeId);
-                      if (idx != -1) {
-                        _placedShapes[idx] = _placedShapes[idx].copyWith(strokeWidth: val);
-                        _rebuildConnectivityGraph();
-                      }
-                    }
-                  });
-                },
-              ),
-            ),
-          ],
-        ),
-      );
-    } else if (_activeTab == StudioBottomTab.ai) {
-      // AI Sub-Tab: Dedicated analysis controls and results card
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        color: isDark ? AppColors.slateDark : AppColors.riceFlourBg,
-        child: _isAnalyzing
-            ? Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      valueColor: AlwaysStoppedAnimation<Color>(AppColors.turmericGold),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Analyzing geometry, loops, and symmetry...',
-                    style: AppTypography.cardTitle.copyWith(fontSize: 13, color: AppColors.turmericAmber),
-                  ),
-                ],
-              )
-            : _lastAnalysis == null
-                ? Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.auto_awesome_rounded, size: 16, color: AppColors.turmericAmber),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Smart Kolam AI Analysis',
-                                  style: AppTypography.cardTitle.copyWith(fontSize: 13),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Evaluates symmetry, loops, and 7-factor complexity on-device.',
-                              style: AppTypography.caption.copyWith(fontSize: 11),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      ElevatedButton.icon(
-                        onPressed: _runSmartAnalysis,
-                        icon: const Icon(Icons.analytics_rounded, size: 16, color: Colors.white),
-                        label: const Text('Analyse Kolam (+30 XP)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.terracottaRed,
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Results Card Header: Symmetry Type + Degree & Complexity Score
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Row(
-                              children: [
-                                const Icon(Icons.auto_awesome_rounded, size: 16, color: AppColors.turmericGold),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    '${_formatSymmetryName(_lastAnalysis!.symmetryType)} (${_lastAnalysis!.rotationalSymmetrySummary != "None" ? "${_lastAnalysis!.rotationalSymmetrySummary} Rot" : "No Rot"})',
-                                    style: AppTypography.cardTitle.copyWith(fontSize: 13, color: AppColors.turmericAmber),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.turmericGold.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              '★ ${_lastAnalysis!.complexityScore}/100 (${_lastAnalysis!.complexityTier})',
-                              style: AppTypography.tagText.copyWith(color: AppColors.turmericAmber, fontSize: 11),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      // Metrics Row: Reflection detected yes/no, Grid size, Closed loops
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Reflection: ${_lastAnalysis!.reflectionDetected ? "Yes (${_lastAnalysis!.reflectionAxesCount} Axes)" : "No"} • Grid: ${_lastAnalysis!.gridSize}',
-                              style: AppTypography.caption.copyWith(fontSize: 11),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.tulsiGreen.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              '${_lastAnalysis!.closedLoopCount} Closed Loops',
-                              style: AppTypography.caption.copyWith(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.tulsiGreen,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      // Action buttons: Re-Analyse, Detailed Breakdown, Save Kolam
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _runSmartAnalysis,
-                              icon: const Icon(Icons.refresh_rounded, size: 14),
-                              label: const Text('Re-Analyse', style: TextStyle(fontSize: 11)),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () {
-                                showModalBottomSheet(
-                                  context: context,
-                                  isScrollControlled: true,
-                                  backgroundColor: Colors.transparent,
-                                  builder: (_) => SmartAnalysisSheet(
-                                    result: _lastAnalysis!,
-                                    onSavePressed: () {
-                                      Navigator.of(context).pop();
-                                      _promptSaveKolam(_lastAnalysis);
-                                    },
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.info_outline_rounded, size: 14),
-                              label: const Text('Breakdown', style: TextStyle(fontSize: 11)),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: () => _promptSaveKolam(_lastAnalysis),
-                              icon: const Icon(Icons.bookmark_add_rounded, size: 14, color: Colors.white),
-                              label: const Text('Save Kolam', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.tulsiGreen,
-                                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-      );
-    } else {
-      // Pigments selector (applies to active pen or selected shape)
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        color: isDark ? AppColors.slateDark : AppColors.riceFlourBg,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: AppColors.drawingPigments.map((color) {
-              final isSel = _selectedColor == color;
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedColor = color;
-                    if (_isShapesMode && _selectedShapeId != null) {
-                      final idx = _placedShapes.indexWhere((s) => s.id == _selectedShapeId);
-                      if (idx != -1) {
-                        _placedShapes[idx] = _placedShapes[idx].copyWith(colorValue: color.toARGB32());
-                        _rebuildConnectivityGraph();
-                      }
-                    }
-                  });
-                },
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 6),
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: isSel ? AppColors.turmericGold : Colors.black26,
-                      width: isSel ? 3.0 : 1.0,
-                    ),
-                    boxShadow: isSel
-                        ? [
-                            BoxShadow(
-                              color: AppColors.turmericGold.withValues(alpha: 0.5),
-                              blurRadius: 6,
-                            )
-                          ]
-                        : null,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      );
-    }
-  }
-
-  Color _getDifficultyColor(KolamDifficulty diff) {
-    switch (diff) {
-      case KolamDifficulty.easy:
-        return AppColors.tulsiGreen;
-      case KolamDifficulty.medium:
-        return AppColors.turmericAmber;
-      case KolamDifficulty.hard:
-        return AppColors.crimsonRed;
-    }
-  }
-
-  Widget _buildTraceModeBanner(bool isDark) {
-    final design = _activeSampleDesign!;
-    final diffColor = _getDifficultyColor(design.difficulty);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-      decoration: BoxDecoration(
-        color: isDark
-            ? AppColors.turmericAmber.withValues(alpha: 0.12)
-            : AppColors.turmericAmber.withValues(alpha: 0.08),
-        border: Border(
-          bottom: BorderSide(
-            color: AppColors.turmericAmber.withValues(alpha: 0.3),
-          ),
-        ),
-      ),
-      child: Row(
-        children: [
-          // Difficulty badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: diffColor.withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              design.difficulty.label,
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // Title & Tamil Name
-          Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        design.name,
-                        style: AppTypography.tagText.copyWith(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                // Color Palette Row: Basic (White/Black), Red, Green, Yellow, Blue, Brown (Theme-Adaptive Light & Dark Shades)
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Color:',
+                        style: AppTypography.cardTitle.copyWith(fontSize: 12),
                       ),
+                      const SizedBox(width: 8),
+                      ...KolamPaletteColor.values.map((paletteColor) {
+                        final isSelected = _selectedPaletteColor == paletteColor;
+                        final shade = paletteColor.getShade(isDark);
+
+                        return Tooltip(
+                          message: '${paletteColor.getDisplayName(isDark)} (${isDark ? "Dark Theme" : "Light Theme"})',
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedPaletteColor = paletteColor;
+                              });
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              margin: const EdgeInsets.symmetric(horizontal: 5),
+                              width: isSelected ? 28 : 22,
+                              height: isSelected ? 28 : 22,
+                              decoration: BoxDecoration(
+                                color: shade,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isSelected
+                                      ? AppColors.turmericGold
+                                      : (isDark ? Colors.white30 : Colors.black26),
+                                  width: isSelected ? 2.5 : 1.2,
+                                ),
+                                boxShadow: [
+                                  if (isSelected)
+                                    BoxShadow(
+                                      color: shade.withValues(alpha: 0.6),
+                                      blurRadius: 8,
+                                      spreadRadius: 1.5,
+                                    ),
+                                ],
+                              ),
+                              child: isSelected
+                                  ? Icon(
+                                      Icons.check,
+                                      size: 14,
+                                      color: shade.computeLuminance() > 0.55
+                                          ? Colors.black87
+                                          : Colors.white,
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+
+                // Layout / Orientation Selector (Square vs Diamond)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Layout:',
+                      style: AppTypography.cardTitle.copyWith(fontSize: 12),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                      label: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.grid_on_rounded, size: 13),
+                          SizedBox(width: 4),
+                          Text('Square (Mat)', style: TextStyle(fontSize: 11)),
+                        ],
+                      ),
+                      selected: _gridOrientation == KolamGridOrientation.square,
+                      onSelected: (val) {
+                        if (val) {
+                          setState(() {
+                            _gridOrientation = KolamGridOrientation.square;
+                            _tileStates.clear();
+                            _selectedCircleIndex = null;
+                          });
+                          _rebuildConnectivityGraph();
+                        }
+                      },
                     ),
                     const SizedBox(width: 6),
-                    Text(
-                      '(${design.gridSize}x${design.gridSize})',
-                      style: AppTypography.caption.copyWith(fontSize: 10),
+                    ChoiceChip(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                      label: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.diamond_outlined, size: 13),
+                          SizedBox(width: 4),
+                          Text('Diamond (Pulli)', style: TextStyle(fontSize: 11)),
+                        ],
+                      ),
+                      selected: _gridOrientation == KolamGridOrientation.diamond,
+                      onSelected: (val) {
+                        if (val) {
+                          setState(() {
+                            _gridOrientation = KolamGridOrientation.diamond;
+                            if (_gridSize % 2 == 0) {
+                              _gridSize = (_gridSize + 1).clamp(1, 9);
+                            }
+                            _tileStates.clear();
+                            _selectedCircleIndex = null;
+                          });
+                          _rebuildConnectivityGraph();
+                        }
+                      },
                     ),
                   ],
                 ),
-                Text(
-                  design.tamilName,
-                  style: AppTypography.caption.copyWith(
-                    fontSize: 10.5,
-                    color: AppColors.turmericGold,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
               ],
             ),
-          ),
-
-          // Reference Layer Visibility Toggle
-          IconButton(
-            icon: Icon(
-              _showReferenceLayer ? Icons.visibility_rounded : Icons.visibility_off_rounded,
-              size: 19,
-              color: _showReferenceLayer ? AppColors.turmericAmber : AppColors.textMuted,
-            ),
-            tooltip: _showReferenceLayer ? 'Hide Ghost Reference' : 'Show Ghost Reference',
-            onPressed: () => setState(() => _showReferenceLayer = !_showReferenceLayer),
-          ),
-
-          // Reference Opacity Selector
-          PopupMenuButton<double>(
-            tooltip: 'Ghost Opacity: ${(_referenceOpacity * 100).round()}%',
-            icon: const Icon(Icons.opacity_rounded, size: 19, color: AppColors.turmericAmber),
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                enabled: false,
-                child: Text('Reference Opacity', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-              ...[0.15, 0.35, 0.55, 0.80].map((val) => PopupMenuItem(
-                    value: val,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('${(val * 100).round()}%'),
-                        if (val == _referenceOpacity)
-                          const Icon(Icons.check_rounded, size: 16, color: AppColors.turmericGold),
-                      ],
-                    ),
-                  )),
-            ],
-            onSelected: (val) => setState(() => _referenceOpacity = val),
-          ),
-
-          const SizedBox(width: 4),
-
-          // "Check Tracing" Button
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.terracottaRed,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              minimumSize: const Size(60, 30),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              elevation: 1,
-            ),
-            icon: const Icon(Icons.fact_check_rounded, size: 13),
-            label: const Text(
-              'Check',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-            ),
-            onPressed: _checkTracingAccuracy,
-          ),
-
-          const SizedBox(width: 2),
-
-          // Exit Trace Mode button
-          IconButton(
-            icon: const Icon(Icons.close_rounded, size: 18),
-            tooltip: 'Exit Trace Mode',
-            onPressed: () {
-              setState(() {
-                _activeSampleDesign = null;
-                _showReferenceLayer = false;
-              });
-            },
           ),
         ],
       ),
     );
-  }
-
-  String _formatSymmetryName(SymmetryType type) {
-    switch (type) {
-      case SymmetryType.dihedralD4:
-        return 'Dihedral D4 (Mandala)';
-      case SymmetryType.fourFoldReflection:
-        return '4-Fold Reflection';
-      case SymmetryType.twoFoldReflection:
-        return '2-Fold Dual Mirror';
-      case SymmetryType.bilateralReflection:
-        return 'Bilateral Reflection';
-      case SymmetryType.rotational90:
-        return '90° 4-Fold Rotation';
-      case SymmetryType.rotational180:
-        return '180° 2-Fold Rotation';
-      case SymmetryType.none:
-        return 'Organic Freeform';
-    }
   }
 }
 

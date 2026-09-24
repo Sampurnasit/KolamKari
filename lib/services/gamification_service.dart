@@ -270,4 +270,12 @@ class GamificationService {
 
     _currentProfile = _currentProfile.copyWith(badges: updatedBadges);
   }
+
+  Future<void> updateUserProfileName({required String name, required String username}) async {
+    _currentProfile = _currentProfile.copyWith(
+      name: name.trim().isEmpty ? 'Kolam Artisan' : name.trim(),
+      username: username.trim().isEmpty ? UserProfile.generateUsername(name) : username.trim(),
+    );
+    await _storage.saveUserProfile(_currentProfile);
+  }
 }

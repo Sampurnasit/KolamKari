@@ -337,7 +337,7 @@ class _SampleDesignsGalleryScreenState extends State<SampleDesignsGalleryScreen>
               child: ClipRRect(
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
                 child: Container(
-                  color: const Color(0xFF261E21), // Traditional red-earth background
+                  color: isDark ? const Color(0xFF261E21) : AppColors.riceFlourBg,
                   child: Stack(
                     children: [
                       CustomPaint(
@@ -345,6 +345,7 @@ class _SampleDesignsGalleryScreenState extends State<SampleDesignsGalleryScreen>
                         painter: _MiniPatternPainter(
                           gridSize: design.gridSize,
                           strokes: design.strokes,
+                          isDark: isDark,
                         ),
                       ),
                       // Difficulty Pill (Top-Left)
@@ -505,10 +506,12 @@ class _SampleDesignsGalleryScreenState extends State<SampleDesignsGalleryScreen>
 class _MiniPatternPainter extends CustomPainter {
   final int gridSize;
   final List<KolamStroke> strokes;
+  final bool isDark;
 
   _MiniPatternPainter({
     required this.gridSize,
     required this.strokes,
+    required this.isDark,
   });
 
   @override
@@ -516,7 +519,7 @@ class _MiniPatternPainter extends CustomPainter {
     // 1. Draw Pulli Dots
     final step = size.width / (gridSize + 1);
     final dotPaint = Paint()
-      ..color = const Color(0xFFFBF4E8).withValues(alpha: 0.75)
+      ..color = (isDark ? const Color(0xFFFBF4E8) : AppColors.kaaviBrick).withValues(alpha: 0.75)
       ..style = PaintingStyle.fill;
 
     for (int r = 1; r <= gridSize; r++) {
@@ -529,7 +532,7 @@ class _MiniPatternPainter extends CustomPainter {
     final scale = size.width / 350.0;
 
     final strokePaint = Paint()
-      ..color = Colors.white
+      ..color = isDark ? Colors.white : AppColors.terracottaRed
       ..strokeWidth = max(1.2, 2.8 * scale)
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round

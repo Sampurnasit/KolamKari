@@ -146,6 +146,18 @@ class HomeScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          // Theme Quick Toggle
+          IconButton(
+            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+            icon: Icon(
+              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              size: 22,
+              color: isDark ? AppColors.turmericGold : AppColors.terracottaRed,
+            ),
+            onPressed: () {
+              ref.read(themeModeProvider.notifier).toggleTheme(isDark);
+            },
+          ),
           // Me profile quick avatar link
           IconButton(
             tooltip: 'View Profile',

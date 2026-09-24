@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/storage_service.dart';
 import '../services/gamification_service.dart';
@@ -54,8 +55,9 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
   Future<void> onQuizCompleted(int score, int total) async {
     await _gamificationService.onQuizCompleted(score: score, total: total);
     // Sunday daily challenge auto-completion
-    if (_dailyChallengeService != null && score >= (total * 0.6).ceil()) {
-      if (_dailyChallengeService.matchesTodayChallenge(type: ChallengeType.heritageQuiz)) {
+    final dailyService = _dailyChallengeService;
+    if (dailyService != null && score >= (total * 0.6).ceil()) {
+      if (dailyService.matchesTodayChallenge(type: ChallengeType.heritageQuiz)) {
         await _gamificationService.onDailyChallengeCompleted();
       }
     }
@@ -65,9 +67,10 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
   Future<void> onMemoryGameWon({int difficulty = 1}) async {
     await _gamificationService.onMemoryGameWon();
     // Monday or Thursday daily challenge auto-completion
-    if (_dailyChallengeService != null) {
-      if (_dailyChallengeService.matchesTodayChallenge(type: ChallengeType.observeRecreate) ||
-          _dailyChallengeService.matchesTodayChallenge(type: ChallengeType.memoryChallenge, difficulty: difficulty)) {
+    final dailyService = _dailyChallengeService;
+    if (dailyService != null) {
+      if (dailyService.matchesTodayChallenge(type: ChallengeType.observeRecreate) ||
+          dailyService.matchesTodayChallenge(type: ChallengeType.memoryChallenge, difficulty: difficulty)) {
         await _gamificationService.onDailyChallengeCompleted();
       }
     }
@@ -77,8 +80,9 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
   Future<void> onPuzzleCompleted() async {
     await _gamificationService.onPuzzleCompleted();
     // Tuesday daily challenge auto-completion
-    if (_dailyChallengeService != null) {
-      if (_dailyChallengeService.matchesTodayChallenge(type: ChallengeType.completePattern)) {
+    final dailyService = _dailyChallengeService;
+    if (dailyService != null) {
+      if (dailyService.matchesTodayChallenge(type: ChallengeType.completePattern)) {
         await _gamificationService.onDailyChallengeCompleted();
       }
     }
@@ -88,8 +92,9 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
   Future<void> onSymmetrySolved() async {
     await _gamificationService.onSymmetrySolved();
     // Wednesday daily challenge auto-completion
-    if (_dailyChallengeService != null) {
-      if (_dailyChallengeService.matchesTodayChallenge(type: ChallengeType.identifySymmetry)) {
+    final dailyService = _dailyChallengeService;
+    if (dailyService != null) {
+      if (dailyService.matchesTodayChallenge(type: ChallengeType.identifySymmetry)) {
         await _gamificationService.onDailyChallengeCompleted();
       }
     }
@@ -98,8 +103,9 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
 
   Future<void> onPatternConstructionWon() async {
     // Friday daily challenge auto-completion
-    if (_dailyChallengeService != null) {
-      if (_dailyChallengeService.matchesTodayChallenge(type: ChallengeType.buildUsingTiles)) {
+    final dailyService = _dailyChallengeService;
+    if (dailyService != null) {
+      if (dailyService.matchesTodayChallenge(type: ChallengeType.buildUsingTiles)) {
         await _gamificationService.onDailyChallengeCompleted();
       }
     }
@@ -109,8 +115,9 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
   Future<void> onKolamCreated({bool hasAnalysis = false}) async {
     await _gamificationService.onKolamCreated();
     // Saturday daily challenge auto-completion (requires save + analysis)
-    if (_dailyChallengeService != null && hasAnalysis) {
-      if (_dailyChallengeService.matchesTodayChallenge(type: ChallengeType.createYourOwn, hasAnalysis: true)) {
+    final dailyService = _dailyChallengeService;
+    if (dailyService != null && hasAnalysis) {
+      if (dailyService.matchesTodayChallenge(type: ChallengeType.createYourOwn, hasAnalysis: true)) {
         await _gamificationService.onDailyChallengeCompleted();
       }
     }
@@ -119,6 +126,11 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
 
   Future<void> onKolamAnalysed() async {
     await _gamificationService.onKolamAnalysed();
+    refresh();
+  }
+
+  Future<void> updateProfileName({required String name, required String username}) async {
+    await _gamificationService.updateUserProfileName(name: name, username: username);
     refresh();
   }
 
@@ -208,3 +220,25 @@ final progressHistoryProvider = Provider<List<XpHistoryEvent>>((ref) {
 
 // Navigation state
 final currentNavIndexProvider = StateProvider<int>((ref) => 0);
+
+// Theme Mode StateNotifier
+class ThemeModeNotifier extends StateNotifier<ThemeMode> {
+  final StorageService _storage;
+
+  ThemeModeNotifier(this._storage) : super(_storage.getThemeMode());
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    state = mode;
+    await _storage.setThemeMode(mode);
+  }
+
+  Future<void> toggleTheme(bool isCurrentlyDark) async {
+    final newMode = isCurrentlyDark ? ThemeMode.light : ThemeMode.dark;
+    await setThemeMode(newMode);
+  }
+}
+
+final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>((ref) {
+  final storage = ref.watch(storageServiceProvider);
+  return ThemeModeNotifier(storage);
+});

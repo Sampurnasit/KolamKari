@@ -1,25 +1,14 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_typography.dart';
+import '../../../data/models/algorithmic_kolam_pattern.dart';
 import '../../../data/models/analysis_result.dart';
 import '../../../data/models/game_result.dart';
-import '../../../data/seed/kolam_image_library.dart';
-import '../../../data/seed/kolam_patterns_library.dart';
 import '../../../providers/app_providers.dart';
-import '../../../services/analysis_service.dart';
-
-enum SymmetryGameMode {
-  symmetryType('Symmetry Type', 'Identify overarching symmetry class (Basic)'),
-  rotationalDegree('Rotational Angle', 'Measure rotational degrees of symmetry (Basic)'),
-  transformation('Transform & Reconstruct', 'Complete half-pattern via geometric transformation (Advanced)');
-
-  final String label;
-  final String description;
-
-  const SymmetryGameMode(this.label, this.description);
-}
+import '../widgets/algorithmic_kolam_view.dart';
 
 class SymmetryGameScreen extends ConsumerStatefulWidget {
   final bool isDailyChallenge;
@@ -35,237 +24,192 @@ class SymmetryGameScreen extends ConsumerStatefulWidget {
   ConsumerState<SymmetryGameScreen> createState() => _SymmetryGameScreenState();
 }
 
-class _SymmetryGameScreenState extends ConsumerState<SymmetryGameScreen> {
-  SymmetryGameMode _gameMode = SymmetryGameMode.symmetryType;
-  int _currentDesignIndex = 0;
-  bool _isAnalyzing = true;
-  AnalysisResult? _computedAnalysis;
+class _SymmetryGameScreenState extends ConsumerState<SymmetryGameScreen>
+    with SingleTickerProviderStateMixin {
+  final Random _rng = Random();
 
+  static const int _totalRounds = 5;
+  int _currentRound = 1;
+  int _correctCount = 0;
+  int _streakCount = 0;
+  int _maxStreak = 0;
+  int _totalScore = 0;
+  int _totalXpEarned = 0;
+  bool _isMatchFinished = false;
+
+  late AlgorithmicKolamPattern _currentPattern;
+  late AnimationController _morphController;
+  late Animation<double> _morphAnimation;
+
+  AnalysisResult? _computedAnalysis;
   int? _selectedAnswerIndex;
   bool _evaluated = false;
   bool _isCorrect = false;
   String _diagnosticExplanation = '';
 
-  int _streakCount = 0;
+  static const List<String> _baseSymmetryOptions = [
+    'Vertical',
+    'Horizontal',
+    'Diagonal',
+    'All Axis (8-Way)',
+  ];
+
+  late List<String> _shuffledOptions;
+
+  static const List<AlgorithmicSymmetry> _availableSymmetries = [
+    AlgorithmicSymmetry.d1Vertical,
+    AlgorithmicSymmetry.d1Horizontal,
+    AlgorithmicSymmetry.d1Diagonal,
+    AlgorithmicSymmetry.d4Multiple,
+  ];
 
   @override
   void initState() {
     super.initState();
-    _analyzeCurrentDesign();
-  }
+    _shuffledOptions = List<String>.from(_baseSymmetryOptions)..shuffle(_rng);
 
-  KolamImageDesign get _currentDesign => KolamImageLibrary.allDesigns[_currentDesignIndex];
+    final initialSymmetry = _availableSymmetries[_rng.nextInt(_availableSymmetries.length)];
+    _currentPattern = AlgorithmicKolamPattern(
+      tnumber: 9,
+      symmetry: initialSymmetry,
+    );
+    _currentPattern.configTile(forcedSymmetry: initialSymmetry, rng: _rng);
+    _computedAnalysis = _currentPattern.toAnalysisResult();
 
-  /// Returns the corresponding geometric pattern definition for live analyzer execution
-  KolamPatternDefinition get _currentPattern {
-    switch (_currentDesign.id) {
-      case 'kolam_img_1': // Eulerian Sikku Vine
-      case 'kolam_img_34': // Navagraha
-      case 'kolam_img_35': // Brahma Mudi
-        return KolamPatternsLibrary.nelliSikku;
-      case 'kolam_img_2': // Square Padi Cross
-      case 'kolam_img_33': // Kambi Knot
-      case 'kolam_img_37': // Temple Sanctum Step
-        return KolamPatternsLibrary.rathamDiamond;
-      case 'kolam_img_36': // Mayil Peacock Feather
-        return KolamPatternsLibrary.kodiVine;
-      case 'kolam_img_main': // Sudarshana Wheel
-        return KolamPatternsLibrary.chakraSwirl;
-      case 'kolam_img_32': // Lotus Mandala
-      case 'kolam_img_38': // Thaamarai Floral
-      default:
-        return KolamPatternsLibrary.thaamaraiLotus;
-    }
-  }
-
-  Future<void> _analyzeCurrentDesign() async {
-    setState(() => _isAnalyzing = true);
-    final analyzer = ref.read(analysisServiceProvider);
-
-    final data = KolamData(
-      strokes: _currentPattern.strokes,
-      gridSize: 5,
-      canvasSize: const Size(350, 350),
+    _morphController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
     );
 
-    // Live analysis from shared LocalGeometryAnalyzer engine
-    final result = await analyzer.analyze(data);
-
-    if (mounted) {
-      setState(() {
-        _computedAnalysis = result;
-        _isAnalyzing = false;
-        _selectedAnswerIndex = null;
-        _evaluated = false;
-        _isCorrect = false;
-        _diagnosticExplanation = '';
+    _morphAnimation = CurvedAnimation(
+      parent: _morphController,
+      curve: Curves.easeInOutCubic,
+    )..addListener(() {
+        setState(() {});
       });
-    }
+
+    _morphController.forward(from: 0.0);
   }
 
-  void _switchMode(SymmetryGameMode mode) {
-    if (_gameMode == mode) return;
+  @override
+  void dispose() {
+    _morphController.dispose();
+    super.dispose();
+  }
+
+  /// Generates a fresh dynamic Kolam with a randomized symmetry type and shuffled options
+  void _generateRandomPattern() {
+    final candidates = _availableSymmetries.where((s) => s != _currentPattern.symmetry).toList();
+    final nextSymmetry = candidates[_rng.nextInt(candidates.length)];
+
+    _currentPattern.configTile(
+      forcedSymmetry: nextSymmetry,
+      rng: _rng,
+    );
+    _computedAnalysis = _currentPattern.toAnalysisResult();
+
+    _shuffledOptions = List<String>.from(_baseSymmetryOptions)..shuffle(_rng);
+
     setState(() {
-      _gameMode = mode;
       _selectedAnswerIndex = null;
       _evaluated = false;
       _isCorrect = false;
       _diagnosticExplanation = '';
     });
+
+    _morphController.forward(from: 0.0);
   }
 
-  void _nextDesign() {
-    setState(() {
-      _currentDesignIndex = (_currentDesignIndex + 1) % KolamImageLibrary.allDesigns.length;
-    });
-    _analyzeCurrentDesign();
-  }
-
-  // --- QUESTION DERIVATIONS (Zero Hardcoding - 100% Derived from LocalGeometryAnalyzer) ---
-
-  List<String> _getOptionsForCurrentMode() {
-    switch (_gameMode) {
-      case SymmetryGameMode.symmetryType:
-        return const ['Reflection', 'Rotational', 'Translational', 'Multiple'];
-
-      case SymmetryGameMode.rotationalDegree:
-        return const ['90°', '180°', '270°', 'None'];
-
-      case SymmetryGameMode.transformation:
-        return const [
-          'Reflect across Vertical Axis (Y-axis)',
-          'Reflect across Horizontal Axis (X-axis)',
-          'Rotate 180° around Centroid',
-          'Rotate 90° Clockwise',
-        ];
-    }
-  }
-
-  /// Live derivation for Question 1: Symmetry Type
-  String _deriveSymmetryTypeAnswer(AnalysisResult res) {
-    final hasReflection = res.reflectionDetected;
-    final hasRotation = res.rotationalDegree > 0;
-
-    if (hasReflection && hasRotation) {
-      return 'Multiple'; // e.g. Dihedral D4 has both reflection planes and rotational invariance
-    } else if (hasReflection) {
-      return 'Reflection'; // e.g. Bilateral reflection only
-    } else if (hasRotation) {
-      return 'Rotational'; // e.g. Pure cyclic rotational invariance without reflection
+  void _onNextRoundOrFinish() {
+    if (_currentRound < _totalRounds) {
+      setState(() {
+        _currentRound++;
+      });
+      _generateRandomPattern();
     } else {
-      return 'Translational'; // Linear repetition or asymmetric
+      _finishMatch();
     }
   }
 
-  /// Live derivation for Question 2: Rotational Degree
-  String _deriveRotationalAnswer(AnalysisResult res) {
-    return res.rotationalSymmetrySummary; // '90°', '180°', '270°', or 'None'
-  }
+  Future<void> _finishMatch() async {
+    setState(() {
+      _isMatchFinished = true;
+    });
 
-  /// Live validation for Advanced Mode: Transformation Reconstruction
-  Future<bool> _validateTransformationLive(int selectedOptionIndex) async {
-    final analyzer = ref.read(analysisServiceProvider);
-    const center = Offset(175.0, 175.0);
-
-    // Extract left-half strokes (x <= center.dx + 4.0)
-    final leftStrokes = <KolamStroke>[];
-    for (final s in _currentPattern.strokes) {
-      final leftPts = s.points.where((p) => p.x <= center.dx + 4.0).toList();
-      if (leftPts.length >= 2) {
-        leftStrokes.add(KolamStroke(
-          points: leftPts,
-          colorValue: s.colorValue,
-          strokeWidth: s.strokeWidth,
-        ));
-      }
-    }
-
-    // Apply chosen transformation to synthesize the right-half
-    final transformedStrokes = <KolamStroke>[];
-    for (final s in leftStrokes) {
-      final transformedPts = s.points.map((p) {
-        switch (selectedOptionIndex) {
-          case 0: // Reflect across Vertical Axis (Y-axis: x' = 2*cx - x, y' = y)
-            return KolamPoint(2 * center.dx - p.x, p.y);
-          case 1: // Reflect across Horizontal Axis (X-axis: x' = x, y' = 2*cy - y)
-            return KolamPoint(p.x, 2 * center.dy - p.y);
-          case 2: // Rotate 180° (x' = 2*cx - x, y' = 2*cy - y)
-            return KolamPoint(2 * center.dx - p.x, 2 * center.dy - p.y);
-          case 3: // Rotate 90° Clockwise around center
-            final dx = p.x - center.dx;
-            final dy = p.y - center.dy;
-            return KolamPoint(center.dx - dy, center.dy + dx);
-          default:
-            return p;
-        }
-      }).toList();
-
-      transformedStrokes.add(KolamStroke(
-        points: transformedPts,
-        colorValue: s.colorValue,
-        strokeWidth: s.strokeWidth,
-      ));
-    }
-
-    // Run reconstructed Kolam through LocalGeometryAnalyzer
-    final reconstructedData = KolamData(
-      strokes: [...leftStrokes, ...transformedStrokes],
-      gridSize: 5,
-      canvasSize: const Size(350, 350),
+    // Save final match result to storage
+    final storage = ref.read(storageServiceProvider);
+    final gameResult = GameResult(
+      id: const Uuid().v4(),
+      gameType: GameType.symmetryGame,
+      score: _totalScore,
+      xpEarned: _totalXpEarned,
+      timestamp: DateTime.now(),
+      difficultyLevel: 1,
+      culturalNote: 'Completed 5-round Symmetry Discovery Match ($_correctCount/$_totalRounds correct).',
+      won: _correctCount >= 3,
     );
+    await storage.recordGameResult(gameResult);
 
-    final reconstructedResult = await analyzer.analyze(reconstructedData);
-
-    // Validate if the reconstructed result satisfies the authentic pattern's symmetry
-    final targetResult = _computedAnalysis!;
-    if (selectedOptionIndex == 0) {
-      // Vertical reflection matches if target has vertical reflection
-      return targetResult.matchingReflectionAxes.contains('Vertical Axis') &&
-          reconstructedResult.matchingReflectionAxes.contains('Vertical Axis');
-    } else if (selectedOptionIndex == 1) {
-      // Horizontal reflection matches if target has horizontal reflection
-      return targetResult.matchingReflectionAxes.contains('Horizontal Axis') &&
-          reconstructedResult.matchingReflectionAxes.contains('Horizontal Axis');
-    } else if (selectedOptionIndex == 2) {
-      // 180° rotation matches if target has 180° or 90° rotational symmetry
-      return (targetResult.rotationalDegree == 180 || targetResult.rotationalDegree == 90) &&
-          (reconstructedResult.rotationalDegree == 180 || reconstructedResult.rotationalDegree == 90);
-    } else if (selectedOptionIndex == 3) {
-      // 90° rotation matches if target has 90° rotational invariance
-      return targetResult.rotationalDegree == 90 && reconstructedResult.rotationalDegree == 90;
+    if (widget.isDailyChallenge && _correctCount >= 3) {
+      await ref.read(userProfileProvider.notifier).onDailyChallengeCompleted();
+      widget.onChallengeCompleted?.call();
     }
+  }
 
-    return false;
+  void _restartMatch() {
+    setState(() {
+      _currentRound = 1;
+      _correctCount = 0;
+      _streakCount = 0;
+      _maxStreak = 0;
+      _totalScore = 0;
+      _totalXpEarned = 0;
+      _isMatchFinished = false;
+    });
+    _generateRandomPattern();
+  }
+
+  String _deriveSymmetryTypeAnswer() {
+    switch (_currentPattern.symmetry) {
+      case AlgorithmicSymmetry.d1Vertical:
+        return 'Vertical';
+      case AlgorithmicSymmetry.d1Horizontal:
+        return 'Horizontal';
+      case AlgorithmicSymmetry.d1Diagonal:
+        return 'Diagonal';
+      case AlgorithmicSymmetry.d4Multiple:
+      default:
+        return 'All Axis (8-Way)';
+    }
   }
 
   Future<void> _submitAnswer(int index) async {
-    if (_evaluated || _computedAnalysis == null) return;
+    if (_evaluated || _computedAnalysis == null || _isMatchFinished) return;
 
-    bool isCorrect = false;
-    String explanation = '';
-    final res = _computedAnalysis!;
+    final correctAnswer = _deriveSymmetryTypeAnswer();
+    final isCorrect = _shuffledOptions[index] == correctAnswer;
 
-    if (_gameMode == SymmetryGameMode.symmetryType) {
-      final correctAnswer = _deriveSymmetryTypeAnswer(res);
-      final options = _getOptionsForCurrentMode();
-      isCorrect = options[index] == correctAnswer;
-      explanation = isCorrect
-          ? 'Correct! LocalGeometryAnalyzer identified: ${res.reflectionAxesCount} reflection axes and ${res.rotationalSymmetrySummary} rotational symmetry.'
-          : 'Incorrect. The analyzer computed that this pattern exhibits "$correctAnswer" symmetry (${res.reflectionAxesCount} reflection axes, ${res.rotationalSymmetrySummary} rotation).';
-    } else if (_gameMode == SymmetryGameMode.rotationalDegree) {
-      final correctAnswer = _deriveRotationalAnswer(res);
-      final options = _getOptionsForCurrentMode();
-      isCorrect = options[index] == correctAnswer;
-      explanation = isCorrect
-          ? 'Correct! The geometry engine verified rotational invariance at ${res.rotationalSymmetrySummary}.'
-          : 'Incorrect. LocalGeometryAnalyzer detected ${res.rotationalSymmetrySummary} rotational symmetry.';
+    final explanation = 'This Kolam exhibits $correctAnswer Symmetry.';
+
+    int gainedScore = 0;
+    int gainedXp = 0;
+
+    if (isCorrect) {
+      _streakCount++;
+      if (_streakCount > _maxStreak) {
+        _maxStreak = _streakCount;
+      }
+      _correctCount++;
+      // Base 100 pts + 25 pts combo bonus per streak
+      gainedScore = 100 + (_streakCount - 1) * 25;
+      gainedXp = 50;
+      _totalScore += gainedScore;
+      _totalXpEarned += gainedXp;
+
+      // Award XP to user profile
+      await ref.read(userProfileProvider.notifier).onSymmetrySolved();
     } else {
-      // Advanced Mode: validate live transformation via analyzer
-      isCorrect = await _validateTransformationLive(index);
-      final options = _getOptionsForCurrentMode();
-      explanation = isCorrect
-          ? 'Transformation verified! Applying "${options[index]}" to the half-pattern successfully reconstructed the sacred Kolam per LocalGeometryAnalyzer.'
-          : 'Invalid transformation. Applying "${options[index]}" breaks the continuous symmetry lines according to LocalGeometryAnalyzer.';
+      _streakCount = 0;
     }
 
     setState(() {
@@ -273,34 +217,7 @@ class _SymmetryGameScreenState extends ConsumerState<SymmetryGameScreen> {
       _evaluated = true;
       _isCorrect = isCorrect;
       _diagnosticExplanation = explanation;
-      if (isCorrect) {
-        _streakCount++;
-      } else {
-        _streakCount = 0;
-      }
     });
-
-    if (isCorrect) {
-      // Award +50 XP and increment symmetryChallengesSolved (Badge: Symmetry Seeker)
-      await ref.read(userProfileProvider.notifier).onSymmetrySolved();
-      if (widget.isDailyChallenge) {
-        await ref.read(userProfileProvider.notifier).onDailyChallengeCompleted();
-        widget.onChallengeCompleted?.call();
-      }
-
-      final storage = ref.read(storageServiceProvider);
-      final gameResult = GameResult(
-        id: const Uuid().v4(),
-        gameType: GameType.symmetryGame,
-        score: 100,
-        xpEarned: 50,
-        timestamp: DateTime.now(),
-        difficultyLevel: _gameMode == SymmetryGameMode.transformation ? 3 : 1,
-        culturalNote: 'Identified symmetry for ${_currentDesign.name} (${_currentDesign.tamilName}) via live geometry analysis.',
-        won: true,
-      );
-      await storage.recordGameResult(gameResult);
-    }
   }
 
   @override
@@ -311,215 +228,194 @@ class _SymmetryGameScreenState extends ConsumerState<SymmetryGameScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.isDailyChallenge ? 'Daily Challenge: Symmetry' : 'Kolam Symmetry Discovery'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.shuffle_rounded),
-            tooltip: 'Next Authentic Kolam',
-            onPressed: _nextDesign,
-          ),
-        ],
       ),
-      body: _isAnalyzing
+      body: _computedAnalysis == null
           ? const Center(child: CircularProgressIndicator(color: AppColors.turmericGold))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Design Header Banner
-                  _buildDesignHeader(isDark),
-                  const SizedBox(height: 12),
+          : _isMatchFinished
+              ? _buildVictorySummaryScreen(isDark)
+              : _buildMatchGameplayScreen(isDark),
+    );
+  }
 
-                  // Mode Selector Tabs
-                  _buildModeSelector(isDark),
-                  const SizedBox(height: 14),
+  /// Live 5-Round Gameplay Screen
+  Widget _buildMatchGameplayScreen(bool isDark) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Round Progress Bar & Match Stats Header
+          _buildMatchHeader(isDark),
+          const SizedBox(height: 20),
 
-                  // Interactive Authentic Kolam Board
-                  Center(
-                    child: _buildKolamBoard(isDark),
-                  ),
-                  const SizedBox(height: 16),
+          // Interactive Dynamic Algorithmic Kolam Board
+          Center(
+            child: _buildKolamBoard(isDark),
+          ),
+          const SizedBox(height: 36),
 
-                  // Question Title
-                  _buildQuestionTitle(),
-                  const SizedBox(height: 10),
+          // Question Title
+          Text(
+            'What symmetry does this dynamic Kolam exhibit?',
+            style: AppTypography.cardTitle.copyWith(fontSize: 15),
+          ),
+          const SizedBox(height: 16),
 
-                  // Answer Options (Live derived)
-                  _buildOptionsList(isDark),
-                  const SizedBox(height: 14),
+          // Answer Options
+          _buildOptionsList(isDark),
+          const SizedBox(height: 16),
 
-                  // Live Analyzer Diagnostic Card
-                  if (_evaluated) ...[
-                    _buildAnalyzerDiagnosticCard(isDark),
-                    const SizedBox(height: 16),
-                  ],
+          // Clean & Simple Symmetry Diagnostic Card
+          if (_evaluated) ...[
+            _buildAnalyzerDiagnosticCard(isDark),
+            const SizedBox(height: 18),
+          ],
 
-                  // Next Action Button
-                  if (_evaluated && _isCorrect)
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _nextDesign,
-                        icon: const Icon(Icons.arrow_forward_rounded, color: Colors.white),
-                        label: const Text('Next Kolam Challenge (+50 XP)'),
-                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.tulsiGreen),
-                      ),
-                    ),
-                  const SizedBox(height: 24),
-                ],
+          // Next Round / View Summary Action Button
+          if (_evaluated)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _onNextRoundOrFinish,
+                icon: Icon(
+                  _currentRound < _totalRounds
+                      ? Icons.arrow_forward_rounded
+                      : Icons.emoji_events_rounded,
+                  color: Colors.white,
+                ),
+                label: Text(
+                  _currentRound < _totalRounds
+                      ? (_isCorrect
+                          ? 'Next Round (${_currentRound + 1}/$_totalRounds) (+50 XP)'
+                          : 'Next Round (${_currentRound + 1}/$_totalRounds)')
+                      : 'Complete Match & View Summary',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  backgroundColor: _currentRound == _totalRounds
+                      ? AppColors.turmericGold
+                      : (_isCorrect ? AppColors.tulsiGreen : AppColors.terracottaRed),
+                  foregroundColor: _currentRound == _totalRounds ? Colors.black87 : Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 3,
+                ),
               ),
             ),
-    );
-  }
-
-  Widget _buildDesignHeader(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.slateCard : const Color(0xFFFBF1E6),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.turmericGold.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.terracottaRed.withValues(alpha: 0.6)),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Image.asset(
-              _currentDesign.assetPath,
-              fit: BoxFit.cover,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _currentDesign.name,
-                        style: AppTypography.cardTitle.copyWith(fontSize: 14),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        if (_streakCount > 0)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            margin: const EdgeInsets.only(right: 6),
-                            decoration: BoxDecoration(
-                              color: AppColors.turmericGold.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              '🔥 $_streakCount',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.tulsiGreen.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            '+50 XP',
-                            style: AppTypography.caption.copyWith(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.tulsiGreen,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${_currentDesign.tamilName} • ${_currentDesign.category}',
-                  style: AppTypography.caption.copyWith(
-                    fontSize: 11,
-                    color: AppColors.turmericAmber,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Computed live by LocalGeometryAnalyzer without hardcoding.',
-                  style: AppTypography.caption.copyWith(fontSize: 10),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
 
-  Widget _buildModeSelector(bool isDark) {
+  /// Round progress indicator + Live Score Header
+  Widget _buildMatchHeader(bool isDark) {
     return Container(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.slateLight : Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(12),
+        color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppColors.turmericGold.withValues(alpha: 0.35),
+        ),
       ),
-      child: Row(
-        children: SymmetryGameMode.values.map((mode) {
-          final isSelected = _gameMode == mode;
-          return Expanded(
-            child: InkWell(
-              onTap: () => _switchMode(mode),
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Round Pill
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isSelected ? AppColors.turmericGold : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppColors.turmericGold.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  mode == SymmetryGameMode.symmetryType
-                      ? 'Type'
-                      : mode == SymmetryGameMode.rotationalDegree
-                          ? 'Rotation'
-                          : 'Transform (Adv)',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    color: isSelected ? Colors.black87 : (isDark ? Colors.white70 : Colors.black87),
+                  'Round $_currentRound / $_totalRounds',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.turmericAmber,
                   ),
                 ),
               ),
-            ),
-          );
-        }).toList(),
+
+              // Score & Streak Badges
+              Row(
+                children: [
+                  if (_streakCount > 0) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.turmericGold.withValues(alpha: 0.25),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '🔥 $_streakCount',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.tulsiGreen.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '⭐ $_totalScore pts',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.tulsiGreen,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // 5 Segmented Dot Progress Indicator
+          Row(
+            children: List.generate(_totalRounds, (index) {
+              final isCurrent = index == _currentRound - 1;
+              final isCompleted = index < _currentRound - 1;
+
+              return Expanded(
+                child: Container(
+                  height: 5,
+                  margin: EdgeInsets.only(
+                    right: index < _totalRounds - 1 ? 6 : 0,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isCompleted
+                        ? AppColors.tulsiGreen
+                        : isCurrent
+                            ? AppColors.turmericGold
+                            : (isDark ? Colors.white12 : Colors.black12),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildKolamBoard(bool isDark) {
     const double boardDim = 270.0;
-    final isAdvanced = _gameMode == SymmetryGameMode.transformation;
-    final showHalfMask = isAdvanced && (!_evaluated || !_isCorrect);
 
     return Container(
       width: boardDim,
       height: boardDim,
       decoration: BoxDecoration(
-        color: const Color(0xFF221A1D),
+        color: isDark ? const Color(0xFF221A1D) : AppColors.riceFlourBg,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: (_evaluated && _isCorrect) ? AppColors.tulsiGreen : AppColors.kaaviBrick,
@@ -536,66 +432,27 @@ class _SymmetryGameScreenState extends ConsumerState<SymmetryGameScreen> {
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          // Authentic Kolam Image
+          // Dynamic Algorithmic Kolam Curves
           Positioned.fill(
-            child: Image.asset(
-              _currentDesign.assetPath,
-              fit: BoxFit.cover,
+            child: Center(
+              child: AlgorithmicKolamView(
+                pattern: _currentPattern,
+                progress: _morphAnimation.value,
+                size: boardDim - 12,
+                strokeWidth: 2.8,
+                showDots: true,
+                margin: 6.0,
+              ),
             ),
           ),
 
-          // Advanced Mode Mask: hides the right half until validated
-          if (showHalfMask)
-            Positioned(
-              left: boardDim / 2,
-              top: 0,
-              width: boardDim / 2,
-              height: boardDim,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1719),
-                  border: Border(
-                    left: BorderSide(color: AppColors.turmericGold, width: 2.0),
-                  ),
-                ),
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.transform_rounded,
-                        color: AppColors.turmericAmber,
-                        size: 32,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Masked Half',
-                        style: AppTypography.caption.copyWith(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(
-                        'Pick transformation to reconstruct',
-                        textAlign: TextAlign.center,
-                        style: AppTypography.caption.copyWith(
-                          color: Colors.white70,
-                          fontSize: 8.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-          // Symmetry Axis Overlays (Vertical & Horizontal Guide Lines)
+          // Symmetry Axis Overlays (Vertical, Horizontal & Diagonal Guide Lines)
           CustomPaint(
             size: const Size(boardDim, boardDim),
             painter: _SymmetryGuidePainter(
               showAxes: true,
-              isRotational: _computedAnalysis?.rotationalDegree != 0,
+              isDiagonal: _currentPattern.symmetry == AlgorithmicSymmetry.d1Diagonal ||
+                  _currentPattern.symmetry == AlgorithmicSymmetry.d4Multiple,
             ),
           ),
         ],
@@ -603,31 +460,9 @@ class _SymmetryGameScreenState extends ConsumerState<SymmetryGameScreen> {
     );
   }
 
-  Widget _buildQuestionTitle() {
-    String title;
-    switch (_gameMode) {
-      case SymmetryGameMode.symmetryType:
-        title = 'What type of symmetry does this Kolam have?';
-        break;
-      case SymmetryGameMode.rotationalDegree:
-        title = 'What is its rotational symmetry?';
-        break;
-      case SymmetryGameMode.transformation:
-        title = 'Which transformation completes this sacred Kolam?';
-        break;
-    }
-
-    return Text(
-      title,
-      style: AppTypography.cardTitle.copyWith(fontSize: 14.5),
-    );
-  }
-
   Widget _buildOptionsList(bool isDark) {
-    final options = _getOptionsForCurrentMode();
-
     return Column(
-      children: List.generate(options.length, (index) {
+      children: List.generate(_shuffledOptions.length, (index) {
         final isSelected = _selectedAnswerIndex == index;
         Color? bg;
         BorderSide border = BorderSide(
@@ -647,12 +482,12 @@ class _SymmetryGameScreenState extends ConsumerState<SymmetryGameScreen> {
         }
 
         return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.only(bottom: 12),
           child: InkWell(
             onTap: () => _submitAnswer(index),
             borderRadius: BorderRadius.circular(12),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
               decoration: BoxDecoration(
                 color: bg ?? (isDark ? AppColors.slateCard : AppColors.riceFlourCard),
                 borderRadius: BorderRadius.circular(12),
@@ -679,7 +514,7 @@ class _SymmetryGameScreenState extends ConsumerState<SymmetryGameScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      options[index],
+                      _shuffledOptions[index],
                       style: AppTypography.bodyText.copyWith(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -702,71 +537,285 @@ class _SymmetryGameScreenState extends ConsumerState<SymmetryGameScreen> {
   }
 
   Widget _buildAnalyzerDiagnosticCard(bool isDark) {
-    final res = _computedAnalysis!;
-
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: _isCorrect
             ? AppColors.tulsiGreen.withValues(alpha: 0.12)
             : AppColors.crimsonRed.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: _isCorrect ? AppColors.tulsiGreen : AppColors.crimsonRed,
+          width: 1.5,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Icon(
-                _isCorrect ? Icons.verified_rounded : Icons.info_outline_rounded,
-                color: _isCorrect ? AppColors.tulsiGreen : AppColors.crimsonRed,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _isCorrect ? 'Geometry Engine Verified! (+50 XP)' : 'Analyzer Diagnostic:',
-                  style: AppTypography.cardTitle.copyWith(
-                    fontSize: 14,
+          Icon(
+            _isCorrect ? Icons.check_circle_rounded : Icons.info_rounded,
+            color: _isCorrect ? AppColors.tulsiGreen : AppColors.crimsonRed,
+            size: 22,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _isCorrect ? 'Correct! (+50 XP)' : 'Incorrect',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
                     color: _isCorrect ? AppColors.tulsiGreen : AppColors.crimsonRed,
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            _diagnosticExplanation,
-            style: AppTypography.bodyText.copyWith(fontSize: 12.5),
-          ),
-          const Divider(height: 16),
-          Text(
-            'Live Analyzer Properties: ${res.matchingReflectionAxes.join(', ')} • Rotational: ${res.rotationalSymmetrySummary} • Closed Loops: ${res.closedLoopCount}',
-            style: AppTypography.caption.copyWith(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.turmericAmber,
+                const SizedBox(height: 2),
+                Text(
+                  _diagnosticExplanation,
+                  style: AppTypography.bodyText.copyWith(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _currentDesign.culturalLore,
-            style: AppTypography.caption.copyWith(fontSize: 11),
           ),
         ],
       ),
+    );
+  }
+
+  /// Celebratory Victory & Match Summary Screen
+  Widget _buildVictorySummaryScreen(bool isDark) {
+    final double accuracy = (_correctCount / _totalRounds) * 100;
+    final bool isMaster = _correctCount == _totalRounds;
+    final bool isWinner = _correctCount >= 3;
+
+    final title = isMaster
+        ? 'Perfect Symmetry Master! 🏆'
+        : isWinner
+            ? 'Outstanding Symmetry Vision! 🌟'
+            : 'Match Completed! 🕉️';
+
+    final subtitle = isMaster
+        ? 'Flawless 5/5 recognition of sacred geometric reflection planes!'
+        : isWinner
+            ? 'You correctly identified $_correctCount of $_totalRounds dynamic Kolam symmetries.'
+            : 'Keep practicing to master all reflection planes of sacred Kolams.';
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Celebratory Trophy Badge Icon
+            Container(
+              width: 90,
+              height: 90,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isWinner
+                    ? AppColors.turmericGold.withValues(alpha: 0.18)
+                    : AppColors.kaaviBrick.withValues(alpha: 0.18),
+                border: Border.all(
+                  color: isWinner ? AppColors.turmericGold : AppColors.kaaviBrick,
+                  width: 3,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (isWinner ? AppColors.turmericGold : AppColors.kaaviBrick)
+                        .withValues(alpha: 0.3),
+                    blurRadius: 20,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Icon(
+                isMaster
+                    ? Icons.military_tech_rounded
+                    : isWinner
+                        ? Icons.emoji_events_rounded
+                        : Icons.auto_awesome_rounded,
+                size: 48,
+                color: isWinner ? AppColors.turmericGold : AppColors.kaaviBrick,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Victory Title
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: AppTypography.screenHeading.copyWith(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: isWinner ? AppColors.turmericGold : null,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // Subtitle
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: AppTypography.bodyText.copyWith(
+                color: isDark ? Colors.white70 : Colors.black54,
+                fontSize: 13.5,
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // 2x2 Match Statistics Card Grid
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: AppColors.turmericGold.withValues(alpha: 0.35),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatItem(
+                          icon: Icons.check_circle_rounded,
+                          iconColor: AppColors.tulsiGreen,
+                          label: 'Accuracy',
+                          value: '$_correctCount / $_totalRounds (${accuracy.round()}%)',
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildStatItem(
+                          icon: Icons.stars_rounded,
+                          iconColor: AppColors.turmericGold,
+                          label: 'Total Score',
+                          value: '$_totalScore pts',
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatItem(
+                          icon: Icons.bolt_rounded,
+                          iconColor: AppColors.tulsiGreen,
+                          label: 'XP Earned',
+                          value: '+$_totalXpEarned XP',
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildStatItem(
+                          icon: Icons.local_fire_department_rounded,
+                          iconColor: AppColors.terracottaRed,
+                          label: 'Max Streak',
+                          value: '$_maxStreak 🔥',
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 28),
+
+            // Action Buttons
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _restartMatch,
+                icon: const Icon(Icons.replay_rounded, color: Colors.white),
+                label: const Text(
+                  'Play Another Match (5 Rounds)',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+                ),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  backgroundColor: AppColors.tulsiGreen,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 2,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back_rounded),
+                label: const Text(
+                  'Return to Play Hub',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  side: BorderSide(
+                    color: isDark ? AppColors.borderDark : AppColors.kaaviBrick,
+                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatItem({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String value,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 16, color: iconColor),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: AppTypography.caption.copyWith(fontSize: 11.5),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: AppTypography.cardTitle.copyWith(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
     );
   }
 }
 
 class _SymmetryGuidePainter extends CustomPainter {
   final bool showAxes;
-  final bool isRotational;
+  final bool isDiagonal;
 
-  const _SymmetryGuidePainter({required this.showAxes, required this.isRotational});
+  const _SymmetryGuidePainter({
+    required this.showAxes,
+    this.isDiagonal = false,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -780,17 +829,17 @@ class _SymmetryGuidePainter extends CustomPainter {
     canvas.drawLine(Offset(size.width / 2, 0), Offset(size.width / 2, size.height), axisPaint);
     canvas.drawLine(Offset(0, size.height / 2), Offset(size.width, size.height / 2), axisPaint);
 
-    // Subtle rotational guide circle around centroid
-    if (isRotational) {
-      final circlePaint = Paint()
-        ..color = AppColors.turmericAmber.withValues(alpha: 0.15)
-        ..style = PaintingStyle.stroke
+    // Diagonal axis guide
+    if (isDiagonal) {
+      final diagPaint = Paint()
+        ..color = AppColors.turmericGold.withValues(alpha: 0.25)
         ..strokeWidth = 1.0;
-      canvas.drawCircle(Offset(size.width / 2, size.height / 2), size.width * 0.35, circlePaint);
+      canvas.drawLine(const Offset(0, 0), Offset(size.width, size.height), diagPaint);
     }
   }
 
   @override
   bool shouldRepaint(covariant _SymmetryGuidePainter oldDelegate) =>
-      oldDelegate.showAxes != showAxes || oldDelegate.isRotational != isRotational;
+      oldDelegate.showAxes != showAxes ||
+      oldDelegate.isDiagonal != isDiagonal;
 }

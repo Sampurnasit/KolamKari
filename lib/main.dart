@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme/app_theme.dart';
 import 'services/storage_service.dart';
 import 'providers/app_providers.dart';
-import 'ui/splash_onboarding/onboarding_screen.dart';
+import 'ui/splash_onboarding/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,18 +22,20 @@ void main() async {
   );
 }
 
-class KolamKariApp extends StatelessWidget {
+class KolamKariApp extends ConsumerWidget {
   const KolamKariApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeModeProvider);
+
     return MaterialApp(
       title: 'KolamKari',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
-      home: const OnboardingScreen(),
+      themeMode: themeMode,
+      home: const SplashScreen(),
     );
   }
 }

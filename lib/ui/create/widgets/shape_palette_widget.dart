@@ -103,7 +103,7 @@ class ShapePaletteWidget extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: const Color(0xFF261E21),
+              color: isDark ? const Color(0xFF261E21) : AppColors.riceFlourBg,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: isDark ? AppColors.borderDark : AppColors.borderLight,
@@ -115,14 +115,14 @@ class ShapePaletteWidget extends StatelessWidget {
                 Expanded(
                   child: CustomPaint(
                     size: const Size(40, 40),
-                    painter: _PrimitiveTilePainter(primitive),
+                    painter: _PrimitiveTilePainter(primitive, isDark: isDark),
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   primitive.name,
-                  style: const TextStyle(
-                    color: Colors.white70,
+                  style: TextStyle(
+                    color: isDark ? Colors.white70 : AppColors.textDark,
                     fontSize: 8.5,
                     fontWeight: FontWeight.w600,
                   ),
@@ -141,8 +141,9 @@ class ShapePaletteWidget extends StatelessWidget {
 
 class _PrimitiveTilePainter extends CustomPainter {
   final KolamShapePrimitive primitive;
+  final bool isDark;
 
-  _PrimitiveTilePainter(this.primitive);
+  _PrimitiveTilePainter(this.primitive, {this.isDark = true});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -165,7 +166,7 @@ class _PrimitiveTilePainter extends CustomPainter {
 
     // Draw path
     final paint = Paint()
-      ..color = const Color(0xFFFFFDF8)
+      ..color = isDark ? const Color(0xFFFFFDF8) : AppColors.terracottaRed
       ..strokeWidth = 2.4
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round

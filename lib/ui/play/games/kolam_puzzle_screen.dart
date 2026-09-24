@@ -526,7 +526,7 @@ class _KolamPuzzleScreenState extends ConsumerState<KolamPuzzleScreen> with Sing
       width: boardDim,
       height: boardDim,
       decoration: BoxDecoration(
-        color: const Color(0xFF221A1D), // Earth slate floor
+        color: isDark ? const Color(0xFF221A1D) : AppColors.riceFlourBg, // Earth slate or rice flour floor
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: (_submitted && _isCorrect) ? AppColors.tulsiGreen : AppColors.kaaviBrick,

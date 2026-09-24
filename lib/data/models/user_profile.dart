@@ -69,6 +69,8 @@ class BadgeItem {
 }
 
 class UserProfile {
+  final String name;
+  final String username;
   final int xp;
   final int level;
   final String levelTitle;
@@ -83,6 +85,8 @@ class UserProfile {
   final int learnModulesCompleted;
 
   const UserProfile({
+    this.name = 'Kolam Artisan',
+    this.username = '@kolam_artisan',
     this.xp = 0,
     this.level = 1,
     this.levelTitle = 'Kolam Explorer',
@@ -97,7 +101,17 @@ class UserProfile {
     this.learnModulesCompleted = 0,
   });
 
+  /// Automatically generates a clean, unique-styled username handle from a display name
+  static String generateUsername(String rawName) {
+    final clean = rawName.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final trimmed = clean.replaceAll(RegExp(r'^_+|_+$'), '');
+    if (trimmed.isEmpty) return '@kolam_artisan';
+    return '@$trimmed';
+  }
+
   UserProfile copyWith({
+    String? name,
+    String? username,
     int? xp,
     int? level,
     String? levelTitle,
@@ -112,6 +126,8 @@ class UserProfile {
     int? learnModulesCompleted,
   }) {
     return UserProfile(
+      name: name ?? this.name,
+      username: username ?? this.username,
       xp: xp ?? this.xp,
       level: level ?? this.level,
       levelTitle: levelTitle ?? this.levelTitle,
@@ -129,6 +145,8 @@ class UserProfile {
 
   Map<String, dynamic> toJson() {
     return {
+      'name': name,
+      'username': username,
       'xp': xp,
       'level': level,
       'levelTitle': levelTitle,
@@ -146,6 +164,8 @@ class UserProfile {
 
   factory UserProfile.fromJson(Map<String, dynamic> map) {
     return UserProfile(
+      name: map['name'] ?? 'Kolam Artisan',
+      username: map['username'] ?? '@kolam_artisan',
       xp: map['xp'] ?? 0,
       level: map['level'] ?? 1,
       levelTitle: map['levelTitle'] ?? 'Kolam Explorer',

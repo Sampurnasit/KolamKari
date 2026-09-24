@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,207 +7,49 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_typography.dart';
+import '../../../data/models/algorithmic_kolam_pattern.dart';
 import '../../../data/models/game_result.dart';
-import '../../../data/models/kolam_shape_primitive.dart';
-import '../../../data/models/sample_kolam_design.dart';
-import '../../../data/seed/kolam_image_library.dart';
-import '../../../data/seed/kolam_patterns_library.dart';
-import '../../../data/seed/sample_designs_library.dart';
+import '../../../data/models/kolam_16_tile.dart';
+import '../../../data/models/kolam_circle_connection.dart';
+import '../../../data/models/saved_kolam.dart';
 import '../../../providers/app_providers.dart';
-import '../../../services/analysis_service.dart';
 import '../../create/widgets/kolam_canvas_widget.dart';
-import '../../create/widgets/shape_palette_widget.dart';
+import '../widgets/kolam_16_tile_view.dart';
 
-/// Target definition model for the Memory Game
-class MemoryGameTarget {
-  final String id;
-  final String name;
-  final String tamilName;
-  final String category;
-  final int difficultyLevel; // 1: 10s, 2: 7s, 3: 5s, 4: 3s
-  final int gridSize;
-  final String culturalLore;
-  final String assetPath;
-  final List<KolamStroke> strokes;
-
-  const MemoryGameTarget({
-    required this.id,
-    required this.name,
-    required this.tamilName,
-    required this.category,
-    required this.difficultyLevel,
-    required this.gridSize,
-    required this.culturalLore,
-    required this.assetPath,
-    required this.strokes,
-  });
-
-  factory MemoryGameTarget.fromImageDesign({
-    required KolamImageDesign design,
-    required int diffLevel,
-    required int gridSize,
-    required List<KolamStroke> strokes,
-  }) {
-    return MemoryGameTarget(
-      id: design.id,
-      name: design.name,
-      tamilName: design.tamilName,
-      category: design.category,
-      difficultyLevel: diffLevel,
-      gridSize: gridSize,
-      culturalLore: design.culturalLore,
-      assetPath: design.assetPath,
-      strokes: strokes,
-    );
-  }
-
-  factory MemoryGameTarget.fromSample(SampleKolamDesign s, int diffLevel, {String? assetPath}) {
-    return MemoryGameTarget(
-      id: s.id,
-      name: s.name,
-      tamilName: s.tamilName,
-      category: s.category,
-      difficultyLevel: diffLevel,
-      gridSize: s.gridSize,
-      culturalLore: s.culturalLore,
-      assetPath: assetPath ?? 'assets/kolam/kolam.jpeg',
-      strokes: s.strokes,
-    );
-  }
-
-  factory MemoryGameTarget.fromPatternDef(KolamPatternDefinition p, int diffLevel, {String? assetPath}) {
-    return MemoryGameTarget(
-      id: p.id,
-      name: p.name,
-      tamilName: p.tamilName,
-      category: p.category,
-      difficultyLevel: diffLevel,
-      gridSize: p.gridSize,
-      culturalLore: p.culturalLore,
-      assetPath: assetPath ?? 'assets/kolam/kolam.jpeg',
-      strokes: p.strokes,
-    );
-  }
-}
-
-/// Catalog of curated targets per difficulty level (1..4) using authentic Kolam images
-class MemoryGameCatalog {
-  static List<MemoryGameTarget> getTargetsForDifficulty(int difficulty) {
-    switch (difficulty) {
-      case 1:
-        // Level 1: 10s Preview, 5x5 Grid beginner patterns
-        return [
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_1'),
-            diffLevel: 1,
-            gridSize: 5,
-            strokes: SampleDesignsLibrary.kodiVineBorder.strokes,
-          ),
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_2'),
-            diffLevel: 1,
-            gridSize: 5,
-            strokes: SampleDesignsLibrary.crossRibbonKolam.strokes,
-          ),
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_33'),
-            diffLevel: 1,
-            gridSize: 5,
-            strokes: SampleDesignsLibrary.cornerLoops.strokes,
-          ),
-        ];
-
-      case 2:
-        // Level 2: 7s Preview, 5x5 & 7x7 moderate loop patterns
-        return [
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_38'),
-            diffLevel: 2,
-            gridSize: 5,
-            strokes: SampleDesignsLibrary.thaamaraiLotusFloral.strokes,
-          ),
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_32'),
-            diffLevel: 2,
-            gridSize: 5,
-            strokes: SampleDesignsLibrary.rathamChariotDiamond.strokes,
-          ),
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_35'),
-            diffLevel: 2,
-            gridSize: 5,
-            strokes: SampleDesignsLibrary.nelliSikkuLoop.strokes,
-          ),
-        ];
-
-      case 3:
-        // Level 3: 5s Preview, 7x7 intricate curves and knots
-        return [
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_main'),
-            diffLevel: 3,
-            gridSize: 7,
-            strokes: SampleDesignsLibrary.chakraSwirlPinwheel.strokes,
-          ),
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_36'),
-            diffLevel: 3,
-            gridSize: 7,
-            strokes: SampleDesignsLibrary.mayilPeacockFeather.strokes,
-          ),
-        ];
-
-      case 4:
-      default:
-        // Level 4: 3s Preview, 7x7 & 9x9 master mandalas
-        return [
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_34'),
-            diffLevel: 4,
-            gridSize: 7,
-            strokes: SampleDesignsLibrary.navagrahaPlanets.strokes,
-          ),
-          MemoryGameTarget.fromImageDesign(
-            design: KolamImageLibrary.getById('kolam_img_37'),
-            diffLevel: 4,
-            gridSize: 9,
-            strokes: SampleDesignsLibrary.mahamandalaPadi.strokes,
-          ),
-        ];
-    }
-  }
-}
-
-/// Evaluation breakdown result
+/// Evaluation score breakdown for the Memory Recall Game
 class MemoryScoreBreakdown {
-  final int pathSimilarityScore; // 0 - 50
-  final double coveragePercent;
-  final double precisionPenalty;
-  final int connectionPointsScore; // 0 - 30
-  final int matchedConnectionDots;
-  final int totalTargetDots;
-  final int timeBonusScore; // 0 - 20
+  final int tileScore; // 0 to 70
+  final int matchedTiles;
+  final int totalTiles;
+  final double matchPercentage;
+  final int timeBonusScore; // 0 to 10
   final double elapsedSeconds;
-  final int totalScore; // 0 - 100
-  final bool isPassing; // >= 60
+  final int maxLives; // 3 or 5
+  final int livesRemaining; // 0 to maxLives
+  final int livesBonus; // 0 to 20
+  final int totalScore; // 0 to 100
+  final bool isPassing;
 
   const MemoryScoreBreakdown({
-    required this.pathSimilarityScore,
-    required this.coveragePercent,
-    required this.precisionPenalty,
-    required this.connectionPointsScore,
-    required this.matchedConnectionDots,
-    required this.totalTargetDots,
+    required this.tileScore,
+    required this.matchedTiles,
+    required this.totalTiles,
+    required this.matchPercentage,
     required this.timeBonusScore,
     required this.elapsedSeconds,
+    required this.maxLives,
+    required this.livesRemaining,
+    required this.livesBonus,
     required this.totalScore,
     required this.isPassing,
   });
 
+  int get livesUsed => maxLives - livesRemaining;
+
   int get stars {
     if (totalScore >= 85) return 3;
     if (totalScore >= 70) return 2;
-    if (totalScore >= 60) return 1;
+    if (totalScore >= 50) return 1;
     return 0;
   }
 }
@@ -216,11 +59,6 @@ enum MemoryPhase {
   preview,
   drawing,
   result,
-}
-
-enum DrawingToolMode {
-  freehand,
-  shapes,
 }
 
 class MemoryGameScreen extends ConsumerStatefulWidget {
@@ -241,7 +79,8 @@ class MemoryGameScreen extends ConsumerStatefulWidget {
   ConsumerState<MemoryGameScreen> createState() => _MemoryGameScreenState();
 }
 
-class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with SingleTickerProviderStateMixin {
+class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen>
+    with SingleTickerProviderStateMixin {
   late int _difficulty;
   MemoryPhase _phase = MemoryPhase.difficultySelect;
   int _secondsLeft = 10;
@@ -250,23 +89,28 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
   Timer? _stopwatchTicker;
   double _elapsedDrawingSeconds = 0.0;
 
-  // Active Kolam target
-  late MemoryGameTarget _currentPattern;
-  final Random _random = Random();
+  // Unified Hearts / Lives System (Level 4: 5 hearts, Levels 1-3: 3 hearts)
+  int get _maxLives => _difficulty == 4 ? 5 : 3;
+  int _livesRemaining = 3;
 
-  // Drawing mode & state
-  DrawingToolMode _toolMode = DrawingToolMode.freehand;
-  final List<KolamStroke> _playerStrokes = [];
-  KolamStroke? _activeStroke;
-  Color _currentColor = Colors.white;
-  double _strokeWidth = 3.5;
+  final Random _rng = Random();
 
-  // Placed shapes state (Prompt 5 reuse)
-  final List<PlacedKolamShape> _placedShapes = [];
-  String? _selectedShapeId;
-  Offset? _snapHighlightPoint;
+  // Active 16-Tile Target Pattern (same generator as Pattern Construction) & Grid Size
+  late KolamTargetPattern _currentTarget;
+  int _gridSize = 4;
 
-  // Evaluation breakdown
+  // --- 16-TILE STUDIO CANVAS STATE ---
+  final Map<int, Kolam16Tile> _tileStates = {};
+  final List<Map<int, Kolam16Tile>> _tileUndoStack = [];
+  final List<Map<int, Kolam16Tile>> _tileRedoStack = [];
+  int? _selectedCircleIndex;
+
+  Color get _selectedColor {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? const Color(0xFFFFFFFF) : const Color(0xFF1E1614);
+  }
+
+  // Evaluation Breakdown
   MemoryScoreBreakdown? _scoreBreakdown;
 
   // Animation controller for countdown pulse
@@ -282,7 +126,6 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
       duration: const Duration(milliseconds: 700),
     )..repeat(reverse: true);
 
-    // If initial difficulty is specified or this is a daily challenge, start immediately
     if (widget.initialDifficulty != null || widget.isDailyChallenge || widget.startImmediately) {
       _loadPatternAndStartCountdown(_difficulty);
     } else {
@@ -313,6 +156,38 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
     }
   }
 
+  int _getGridSizeForDifficulty(int diff) {
+    switch (diff) {
+      case 1:
+        return 4; // 4x4 Bilateral
+      case 2:
+        return 5; // 5x5 Diagonal/Rotational
+      case 3:
+        return 6; // 6x6 4-Way D4
+      case 4:
+      default:
+        return 8; // 8x8 Grand D4 Mandala
+    }
+  }
+
+  AlgorithmicSymmetry _getSymmetryForDifficulty(int diff) {
+    switch (diff) {
+      case 1:
+        return _rng.nextBool()
+            ? AlgorithmicSymmetry.d1Vertical
+            : AlgorithmicSymmetry.d1Horizontal;
+      case 2:
+        return _rng.nextBool()
+            ? AlgorithmicSymmetry.d1Diagonal
+            : AlgorithmicSymmetry.c4Rotational;
+      case 3:
+        return AlgorithmicSymmetry.d4Multiple;
+      case 4:
+      default:
+        return AlgorithmicSymmetry.d4Multiple;
+    }
+  }
+
   void _selectDifficultyAndStart(int diff) {
     setState(() {
       _difficulty = diff;
@@ -321,17 +196,29 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
   }
 
   void _loadPatternAndStartCountdown(int diff) {
-    final pool = MemoryGameCatalog.getTargetsForDifficulty(diff);
-    final selected = pool[_random.nextInt(pool.length)];
+    final gridSize = _getGridSizeForDifficulty(diff);
+    final symmetry = _getSymmetryForDifficulty(diff);
+
+    final target = Kolam16TileLibrary.generateRandomTargetPattern(
+      gridDimension: gridSize,
+      forcedSymmetry: symmetry,
+      rng: _rng,
+    );
 
     setState(() {
       _difficulty = diff;
-      _currentPattern = selected;
-      _playerStrokes.clear();
-      _activeStroke = null;
-      _placedShapes.clear();
-      _selectedShapeId = null;
-      _snapHighlightPoint = null;
+      _gridSize = gridSize;
+      _currentTarget = target;
+
+      // Reset Lives (3 Hearts = 3 Peek Hint Chances)
+      _livesRemaining = _maxLives;
+
+      // Reset Canvas
+      _tileStates.clear();
+      _tileUndoStack.clear();
+      _tileRedoStack.clear();
+      _selectedCircleIndex = null;
+
       _scoreBreakdown = null;
       _phase = MemoryPhase.preview;
       _secondsLeft = _getCountdownSeconds(diff);
@@ -383,161 +270,336 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
     });
   }
 
-  // --- FREEHAND GESTURES ---
+  /// Opens the Hint Peek dialog allowing the user to view the target pattern (spends 1 Heart / Life).
+  void _openHintPeek() {
+    if (_livesRemaining <= 0) return;
 
-  void _onPanStart(Offset pt) {
-    if (_phase != MemoryPhase.drawing || _toolMode != DrawingToolMode.freehand) return;
     setState(() {
-      _activeStroke = KolamStroke(
-        points: [KolamPoint(pt.dx, pt.dy)],
-        colorValue: _currentColor.toARGB32(),
-        strokeWidth: _strokeWidth,
-      );
+      _livesRemaining--;
+    });
+
+    _drawingStopwatch.stop();
+
+    int peekSecondsLeft = 5;
+    Timer? peekTimer;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            peekTimer ??= Timer.periodic(const Duration(seconds: 1), (timer) {
+              if (peekSecondsLeft > 1) {
+                setDialogState(() {
+                  peekSecondsLeft--;
+                });
+              } else {
+                timer.cancel();
+                if (Navigator.of(dialogCtx).canPop()) {
+                  Navigator.of(dialogCtx).pop();
+                }
+              }
+            });
+
+            return Dialog(
+              backgroundColor: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.visibility_rounded,
+                                color: AppColors.turmericAmber, size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Pattern Peek Hint',
+                              style: AppTypography.cardTitle.copyWith(fontSize: 16),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.terracottaRed.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '${peekSecondsLeft}s',
+                            style: const TextStyle(
+                              color: AppColors.terracottaRed,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: 260,
+                      height: 260,
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1B1514) : const Color(0xFFFAF2E7),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.turmericGold.withValues(alpha: 0.4)),
+                      ),
+                      padding: const EdgeInsets.all(8),
+                      child: Center(
+                        child: KolamNxNPreviewView(
+                          tiles: _currentTarget.targetTiles,
+                          gridDimension: _gridSize,
+                          size: 244,
+                          strokeWidth: _gridSize == 4
+                              ? 3.0
+                              : (_gridSize == 5 ? 2.6 : (_gridSize == 6 ? 2.2 : 1.8)),
+                          showDots: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '${_currentTarget.name} (${_currentTarget.category})',
+                      style: AppTypography.caption.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.turmericAmber,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.crimsonRed.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.favorite_rounded,
+                              color: AppColors.crimsonRed, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Spent 1 Heart • $_livesRemaining of $_maxLives Hearts remaining',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.crimsonRed,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: () {
+                        peekTimer?.cancel();
+                        Navigator.of(dialogCtx).pop();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.turmericGold,
+                        foregroundColor: Colors.black87,
+                        minimumSize: const Size(double.infinity, 38),
+                      ),
+                      child: const Text(
+                        'Got It! Return to Drawing',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ).then((_) {
+      peekTimer?.cancel();
+      if (mounted && _phase == MemoryPhase.drawing) {
+        _drawingStopwatch.start();
+      }
     });
   }
 
-  void _onPanUpdate(Offset pt) {
-    if (_phase != MemoryPhase.drawing || _toolMode != DrawingToolMode.freehand || _activeStroke == null) return;
-    setState(() {
-      final pts = List<KolamPoint>.from(_activeStroke!.points)..add(KolamPoint(pt.dx, pt.dy));
-      _activeStroke = KolamStroke(
-        points: pts,
-        colorValue: _currentColor.toARGB32(),
-        strokeWidth: _strokeWidth,
-      );
-    });
-  }
+  // --- GRID DOTS CALCULATION ---
 
-  void _onPanEnd() {
-    if (_phase != MemoryPhase.drawing || _toolMode != DrawingToolMode.freehand || _activeStroke == null) return;
-    setState(() {
-      _playerStrokes.add(_activeStroke!);
-      _activeStroke = null;
-    });
-  }
-
-  // --- SHAPES MODE HANDLERS (Prompt 5 reuse) ---
-
-  void _onShapeSelectedFromPalette(KolamShapePrimitive primitive) {
-    if (_phase != MemoryPhase.drawing) return;
-    const center = Offset(175.0, 175.0);
-    final stepOffset = _placedShapes.isEmpty
-        ? Offset.zero
-        : Offset(
-            ((_placedShapes.length % 3) - 1) * 30.0,
-            ((_placedShapes.length % 3) - 1) * 30.0,
-          );
-    _onShapeDropped(primitive, center + stepOffset);
-  }
-
-  void _onShapeDropped(KolamShapePrimitive primitive, Offset dropOffset) {
-    if (_phase != MemoryPhase.drawing) return;
-    final id = const Uuid().v4();
-    final defaultSize = (350.0 / (_currentPattern.gridSize + 1) * 1.5).clamp(45.0, 85.0);
-
-    // Snap to nearest dot
-    final snappedPos = _snapToNearestDot(dropOffset, 350.0, _currentPattern.gridSize);
-
-    final shape = PlacedKolamShape(
-      id: id,
-      primitiveId: primitive.id,
-      position: snappedPos,
-      size: defaultSize,
-      colorValue: _currentColor.toARGB32(),
-      strokeWidth: _strokeWidth,
+  List<Offset> _getGridDots(double canvasSize) {
+    return KolamGridLayout.generateDots(
+      canvasSize: canvasSize,
+      gridSize: _gridSize,
+      orientation: KolamGridOrientation.square,
     );
-
-    setState(() {
-      _placedShapes.add(shape);
-      _selectedShapeId = id;
-      _snapHighlightPoint = snappedPos;
-      Future.delayed(const Duration(milliseconds: 400), () {
-        if (mounted) setState(() => _snapHighlightPoint = null);
-      });
-    });
   }
 
-  Offset _snapToNearestDot(Offset pos, double canvasDim, int gridSize) {
-    final step = canvasDim / (gridSize + 1);
-    double minD = double.infinity;
-    Offset best = pos;
-    for (int r = 1; r <= gridSize; r++) {
-      for (int c = 1; c <= gridSize; c++) {
-        final dot = Offset(c * step, r * step);
-        final d = (dot - pos).distance;
-        if (d < minD) {
-          minD = d;
-          best = dot;
-        }
+  // --- 16-TILE ACTIONS & GESTURES ---
+
+  void _saveTileUndoSnapshot() {
+    _tileUndoStack.add(Map.from(_tileStates));
+    _tileRedoStack.clear();
+  }
+
+  void _toggleJoinCircles(int fromIndex, int toIndex) {
+    final dots = _getGridDots(350.0);
+    if (fromIndex >= dots.length || toIndex >= dots.length) return;
+
+    final pA = dots[fromIndex];
+    final pB = dots[toIndex];
+    final delta = pB - pA;
+
+    int bitFrom;
+    int bitTo;
+    if (delta.dy.abs() >= delta.dx.abs()) {
+      if (delta.dy > 0) {
+        bitFrom = 0; // South
+        bitTo = 2; // North
+      } else {
+        bitFrom = 2; // North
+        bitTo = 0; // South
+      }
+    } else {
+      if (delta.dx > 0) {
+        bitFrom = 3; // East
+        bitTo = 1; // West
+      } else {
+        bitFrom = 1; // West
+        bitTo = 3; // East
       }
     }
-    return minD <= step * 0.75 ? best : pos;
-  }
 
-  void _onShapeSelected(String shapeId) {
     setState(() {
-      _selectedShapeId = shapeId;
-    });
-  }
+      _saveTileUndoSnapshot();
 
-  void _onShapeRotated(String shapeId) {
-    final idx = _placedShapes.indexWhere((s) => s.id == shapeId);
-    if (idx == -1) return;
-    setState(() {
-      final s = _placedShapes[idx];
-      _placedShapes[idx] = s.copyWith(rotationDegrees: (s.rotationDegrees + 45) % 360);
-    });
-  }
+      final currentTileA = _tileStates[fromIndex] ?? Kolam16Tile.circle;
+      final currentTileB = _tileStates[toIndex] ?? Kolam16Tile.circle;
 
-  void _onShapeDeleted(String shapeId) {
-    setState(() {
-      _placedShapes.removeWhere((s) => s.id == shapeId);
-      if (_selectedShapeId == shapeId) _selectedShapeId = null;
-    });
-  }
+      final isAlreadyConnected = (currentTileA.mask & (1 << bitFrom) != 0) &&
+          (currentTileB.mask & (1 << bitTo) != 0);
 
-  void _undoLastAction() {
-    setState(() {
-      if (_toolMode == DrawingToolMode.shapes && _placedShapes.isNotEmpty) {
-        if (_selectedShapeId != null) {
-          _placedShapes.removeWhere((s) => s.id == _selectedShapeId);
-          _selectedShapeId = null;
-        } else {
-          _placedShapes.removeLast();
-        }
-      } else if (_playerStrokes.isNotEmpty) {
-        _playerStrokes.removeLast();
-      } else if (_placedShapes.isNotEmpty) {
-        _placedShapes.removeLast();
+      if (isAlreadyConnected) {
+        _tileStates[fromIndex] = currentTileA.setBit(bitFrom, false);
+        _tileStates[toIndex] = currentTileB.setBit(bitTo, false);
+      } else {
+        _tileStates[fromIndex] = currentTileA.setBit(bitFrom, true);
+        _tileStates[toIndex] = currentTileB.setBit(bitTo, true);
       }
+
+      _selectedCircleIndex = toIndex;
     });
+  }
+
+  void _onCircleTapped(int dotIndex, int? quadrantBit) {
+    if (_phase != MemoryPhase.drawing) return;
+
+    if (quadrantBit != null) {
+      setState(() {
+        _saveTileUndoSnapshot();
+        final current = _tileStates[dotIndex] ?? Kolam16Tile.circle;
+        final updated = current.toggleBit(quadrantBit);
+        _tileStates[dotIndex] = updated;
+        _selectedCircleIndex = dotIndex;
+      });
+    } else {
+      setState(() {
+        if (_selectedCircleIndex == null) {
+          _selectedCircleIndex = dotIndex;
+        } else if (_selectedCircleIndex == dotIndex) {
+          _saveTileUndoSnapshot();
+          final current = _tileStates[dotIndex] ?? Kolam16Tile.circle;
+          final nextMask = (current.mask + 1) % 16;
+          final updated = Kolam16Tile(nextMask);
+          _tileStates[dotIndex] = updated;
+        } else {
+          _toggleJoinCircles(_selectedCircleIndex!, dotIndex);
+        }
+      });
+    }
+  }
+
+  void _onCanvasPanStart(Offset point) {
+    if (_phase != MemoryPhase.drawing) return;
+    final dots = _getGridDots(350.0);
+    final ringRadius =
+        KolamGridLayout.getRingRadius(350.0, _gridSize, KolamGridOrientation.square);
+    final hit =
+        KolamGridLayout.findHitCircleDot(tapPos: point, dots: dots, ringRadius: ringRadius);
+    if (hit != null) {
+      setState(() {
+        _selectedCircleIndex = hit;
+      });
+    }
+  }
+
+  void _onCanvasPanUpdate(Offset point) {
+    if (_phase != MemoryPhase.drawing) return;
+    final dots = _getGridDots(350.0);
+    final ringRadius =
+        KolamGridLayout.getRingRadius(350.0, _gridSize, KolamGridOrientation.square);
+    final hit =
+        KolamGridLayout.findHitCircleDot(tapPos: point, dots: dots, ringRadius: ringRadius);
+    if (hit != null && _selectedCircleIndex != null && hit != _selectedCircleIndex) {
+      _toggleJoinCircles(_selectedCircleIndex!, hit);
+    }
+  }
+
+  // --- UNDO / REDO / CLEAR ---
+
+  bool get _canUndo => _tileUndoStack.isNotEmpty || _tileStates.isNotEmpty;
+  bool get _canRedo => _tileRedoStack.isNotEmpty;
+
+  void _undoAction() {
+    if (_tileUndoStack.isNotEmpty) {
+      setState(() {
+        _tileRedoStack.add(Map.from(_tileStates));
+        _tileStates.clear();
+        _tileStates.addAll(_tileUndoStack.removeLast());
+      });
+    } else if (_tileStates.isNotEmpty) {
+      setState(() {
+        _tileRedoStack.add(Map.from(_tileStates));
+        _tileStates.clear();
+      });
+    }
+  }
+
+  void _redoAction() {
+    if (_tileRedoStack.isNotEmpty) {
+      setState(() {
+        _tileUndoStack.add(Map.from(_tileStates));
+        _tileStates.clear();
+        _tileStates.addAll(_tileRedoStack.removeLast());
+      });
+    }
   }
 
   void _clearCanvas() {
+    if (_tileStates.isEmpty) return;
     setState(() {
-      _playerStrokes.clear();
-      _activeStroke = null;
-      _placedShapes.clear();
-      _selectedShapeId = null;
-      _snapHighlightPoint = null;
+      _saveTileUndoSnapshot();
+      _tileStates.clear();
+      _selectedCircleIndex = null;
     });
   }
 
-  // --- SCORING ENGINE ---
+  // --- EXTRACT STROKES FOR EVALUATION ---
+
+  // --- SCORING & EVALUATION ENGINE ---
 
   Future<void> _evaluateSubmission() async {
     _drawingStopwatch.stop();
     _stopwatchTicker?.cancel();
     final elapsedSec = _drawingStopwatch.elapsedMilliseconds / 1000.0;
 
-    // Convert placed shapes into KolamStrokes
-    final shapeStrokes = _placedShapes.map((s) => s.toStroke()).toList();
-    final allUserStrokes = [..._playerStrokes, ...shapeStrokes];
-
-    if (allUserStrokes.isEmpty) {
+    if (_tileStates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please draw lines or place shapes before submitting!'),
+          content: Text('Please place or customize 16-Tile nodes before submitting!'),
           backgroundColor: AppColors.terracottaRed,
         ),
       );
@@ -545,126 +607,179 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
       return;
     }
 
-    // 1. Resample target strokes at 8px steps
-    final targetPoints = <Offset>[];
-    for (final stroke in _currentPattern.strokes) {
-      if (stroke.points.isEmpty) continue;
-      for (int i = 0; i < stroke.points.length - 1; i++) {
-        final p1 = Offset(stroke.points[i].x, stroke.points[i].y);
-        final p2 = Offset(stroke.points[i + 1].x, stroke.points[i + 1].y);
-        final dist = (p2 - p1).distance;
-        final steps = max(1, (dist / 8.0).ceil());
-        for (int s = 0; s < steps; s++) {
-          final t = s / steps;
-          targetPoints.add(Offset.lerp(p1, p2, t)!);
-        }
-      }
-      targetPoints.add(Offset(stroke.points.last.x, stroke.points.last.y));
-    }
-
-    // 2. Resample user strokes at 8px steps
-    final userPoints = <Offset>[];
-    for (final stroke in allUserStrokes) {
-      if (stroke.points.isEmpty) continue;
-      for (int i = 0; i < stroke.points.length - 1; i++) {
-        final p1 = Offset(stroke.points[i].x, stroke.points[i].y);
-        final p2 = Offset(stroke.points[i + 1].x, stroke.points[i + 1].y);
-        final dist = (p2 - p1).distance;
-        final steps = max(1, (dist / 8.0).ceil());
-        for (int s = 0; s < steps; s++) {
-          final t = s / steps;
-          userPoints.add(Offset.lerp(p1, p2, t)!);
-        }
-      }
-      userPoints.add(Offset(stroke.points.last.x, stroke.points.last.y));
-    }
-
-    // CRITERION 1: Path Similarity (0 to 50 pts)
-    const double matchThreshold = 26.0;
-    int matchedTargetCount = 0;
-    for (final tp in targetPoints) {
-      for (final up in userPoints) {
-        if ((tp - up).distance <= matchThreshold) {
-          matchedTargetCount++;
-          break;
-        }
-      }
-    }
-    final double coverageRatio = targetPoints.isNotEmpty ? (matchedTargetCount / targetPoints.length) : 0.0;
-
-    // Precision penalty for stray points (> 45px from all target points)
-    int strayUserPoints = 0;
-    for (final up in userPoints) {
-      bool nearTarget = false;
-      for (final tp in targetPoints) {
-        if ((up - tp).distance <= 45.0) {
-          nearTarget = true;
-          break;
-        }
-      }
-      if (!nearTarget) strayUserPoints++;
-    }
-    final double strayRatio = userPoints.isNotEmpty ? (strayUserPoints / userPoints.length) : 0.0;
-    final double precisionPenalty = strayRatio * 15.0; // max 15 pts penalty for wild scribbling
-    final double rawPathScore = (coverageRatio * 50.0) - precisionPenalty;
-    final int pathScore = rawPathScore.clamp(0.0, 50.0).round();
-
-    // CRITERION 2: Sacred Connection Points (0 to 30 pts)
-    final step = 350.0 / (_currentPattern.gridSize + 1);
-    final targetActiveDots = <Offset>[];
-    for (int r = 1; r <= _currentPattern.gridSize; r++) {
-      for (int c = 1; c <= _currentPattern.gridSize; c++) {
-        final dot = Offset(c * step, r * step);
-        bool touchesDot = false;
-        for (final tp in targetPoints) {
-          if ((tp - dot).distance <= 24.0) {
-            touchesDot = true;
-            break;
-          }
-        }
-        if (touchesDot) targetActiveDots.add(dot);
+    final totalCells = _currentTarget.totalCells;
+    int matchedCount = 0;
+    for (int i = 0; i < totalCells; i++) {
+      final targetTile = _currentTarget.targetTiles[i] ?? const Kolam16Tile(0);
+      final userTile = _tileStates[i] ?? const Kolam16Tile(0);
+      if (userTile.mask == targetTile.mask) {
+        matchedCount++;
       }
     }
 
-    int matchedDotsCount = 0;
-    for (final dot in targetActiveDots) {
-      for (final up in userPoints) {
-        if ((up - dot).distance <= 26.0) {
-          matchedDotsCount++;
-          break;
-        }
-      }
-    }
-    final double connectionRatio = targetActiveDots.isNotEmpty ? (matchedDotsCount / targetActiveDots.length) : 1.0;
-    final int connectionScore = (connectionRatio * 30.0).round().clamp(0, 30);
+    final double matchPercentage = (matchedCount / totalCells) * 100.0;
+    final int tileScore = ((matchedCount / totalCells) * 70.0).round().clamp(0, 70);
 
-    // CRITERION 3: Time Taken / Speed Bonus (0 to 20 pts)
-    // Faster accurate recreation gains higher bonus
-    final double expectedSec = 20.0 + (_currentPattern.gridSize * 3.0);
+    // Speed & Recall Bonus (0 to 10 pts)
+    final double expectedSec = 20.0 + (_gridSize * 3.0);
     double rawTimeScore;
     if (elapsedSec <= 15.0) {
-      rawTimeScore = 20.0;
+      rawTimeScore = 10.0;
     } else if (elapsedSec <= expectedSec) {
       final t = (elapsedSec - 15.0) / (expectedSec - 15.0);
-      rawTimeScore = 20.0 - (t * 8.0); // 20 down to 12
+      rawTimeScore = 10.0 - (t * 4.0);
     } else {
       final extra = (elapsedSec - expectedSec) / 10.0;
-      rawTimeScore = max(6.0, 12.0 - extra); // minimum 6 pts
+      rawTimeScore = max(3.0, 6.0 - extra);
     }
-    final int timeScore = rawTimeScore.round().clamp(0, 20);
+    final int timeScore = rawTimeScore.round().clamp(0, 10);
 
-    final int finalTotalScore = (pathScore + connectionScore + timeScore).clamp(0, 100);
-    final bool isPassing = finalTotalScore >= 60; // 60%+ passing threshold
+    final bool isExactMatch = matchedCount == totalCells;
+    final bool isAccurate = isExactMatch || (matchedCount / totalCells >= 0.70);
+
+    // Check Hearts / Lives if inaccurate
+    if (!isExactMatch && _livesRemaining > 1) {
+      setState(() {
+        _livesRemaining--;
+      });
+
+      _drawingStopwatch.start();
+
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (dialogCtx) {
+          final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+          return AlertDialog(
+            backgroundColor: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Row(
+              children: [
+                const Icon(Icons.heart_broken_rounded, color: AppColors.crimsonRed, size: 28),
+                const SizedBox(width: 8),
+                Text(
+                  'Pattern Mismatch',
+                  style: AppTypography.cardTitle.copyWith(color: AppColors.crimsonRed),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$matchedCount of $totalCells tiles matched (${matchPercentage.toStringAsFixed(0)}% accuracy).',
+                  style: AppTypography.bodyText,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Text('Hearts Left: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ...List.generate(_maxLives, (i) {
+                      final isAlive = i < _livesRemaining;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: Icon(
+                          isAlive ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                          size: 20,
+                          color: isAlive ? AppColors.crimsonRed : Colors.grey,
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.turmericAmber.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.turmericAmber.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.lightbulb_outline_rounded,
+                          size: 18, color: AppColors.turmericAmber),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _livesRemaining > 0
+                              ? 'Tip: You can use a Heart (❤️ $_livesRemaining left) to Peek at the pattern again!'
+                              : 'Tip: Inspect node curves and symmetries to adjust your tiles.',
+                          style: AppTypography.caption.copyWith(
+                            color: AppColors.turmericAmber,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              if (_livesRemaining > 0)
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(dialogCtx).pop();
+                    _openHintPeek();
+                  },
+                  icon: const Icon(Icons.visibility_rounded, size: 16),
+                  label: const Text('Peek Pattern (Use 1 ❤️)'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.turmericAmber,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(),
+                child: const Text('Continue Editing',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    if (!isExactMatch && _livesRemaining == 1) {
+      _livesRemaining = 0;
+    }
+
+    final int livesBonus;
+    if (_maxLives == 5) {
+      livesBonus = (_livesRemaining * 4).clamp(0, 20); // 4 pts per heart (up to 20 pts)
+    } else {
+      switch (_livesRemaining) {
+        case 3:
+          livesBonus = 20; // 3/3 Hearts Preserved (Flawless!)
+          break;
+        case 2:
+          livesBonus = 13; // 2/3 Hearts Preserved
+          break;
+        case 1:
+          livesBonus = 7; // 1/3 Hearts Preserved
+          break;
+        default:
+          livesBonus = 0; // 0 Hearts Preserved
+          break;
+      }
+    }
+
+    final int finalTotalScore = (tileScore + timeScore + livesBonus).clamp(0, 100);
+    final bool isPassing = isAccurate && _livesRemaining > 0 && finalTotalScore >= 50;
 
     final breakdown = MemoryScoreBreakdown(
-      pathSimilarityScore: pathScore,
-      coveragePercent: coverageRatio * 100.0,
-      precisionPenalty: precisionPenalty,
-      connectionPointsScore: connectionScore,
-      matchedConnectionDots: matchedDotsCount,
-      totalTargetDots: targetActiveDots.length,
+      tileScore: tileScore,
+      matchedTiles: matchedCount,
+      totalTiles: totalCells,
+      matchPercentage: matchPercentage,
       timeBonusScore: timeScore,
       elapsedSeconds: elapsedSec,
+      maxLives: _maxLives,
+      livesRemaining: _livesRemaining,
+      livesBonus: livesBonus,
       totalScore: finalTotalScore,
       isPassing: isPassing,
     );
@@ -691,11 +806,74 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
       xpEarned: isPassing ? 50 : 15,
       timestamp: DateTime.now(),
       difficultyLevel: _difficulty,
-      culturalNote: 'Memorized ${_currentPattern.name} (${_currentPattern.category}).',
+      culturalNote:
+          'Memorized 16-Tile ${_currentTarget.name} (${_currentTarget.category}).',
       won: isPassing,
     );
     await storage.recordGameResult(result);
   }
+
+  // --- SAVE RECREATED KOLAM TO GALLERY ---
+
+  void _saveRecreatedKolam() {
+    if (_tileStates.isEmpty) return;
+
+    final defaultName = 'Memory ${_currentTarget.name}';
+    final nameController = TextEditingController(text: defaultName);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Save to My Kolams'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: 'Kolam Name',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              final id = const Uuid().v4();
+              final tileStatesJson =
+                  jsonEncode(_tileStates.map((k, v) => MapEntry(k.toString(), v.mask)));
+
+              final newKolam = SavedKolam(
+                id: id,
+                name: nameController.text.trim().isEmpty ? defaultName : nameController.text.trim(),
+                createdDate: DateTime.now(),
+                canvasStrokeData: '[]',
+                gridSize: _gridSize,
+                orientation: KolamGridOrientation.square.name,
+                colorValue: _selectedColor.toARGB32(),
+                tileStatesData: tileStatesJson,
+                complexityScore: _scoreBreakdown?.totalScore ?? 75,
+                culturalTag: 'Recreated 16-Tile ${_currentTarget.category}',
+              );
+
+              await ref.read(savedKolamsProvider.notifier).save(newKolam);
+
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: AppColors.tulsiGreen,
+                    content: Text('Saved "${newKolam.name}" to My Kolams Gallery!'),
+                  ),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // BUILD ROUTER
+  // ==========================================
 
   @override
   Widget build(BuildContext context) {
@@ -795,15 +973,17 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Sacred Visual Recall',
+                        '16-Tile Visual Recall',
                         style: AppTypography.cardTitle.copyWith(fontSize: 18),
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Select your difficulty tier. Memorize the sacred pulli loops, then recreate the geometry from pure mental memory.',
+                        'Select your difficulty tier. Memorize the procedurally generated Kolam, then recreate the 16-Tile curves on the exact studio canvas from mental recall.',
                         style: AppTypography.caption.copyWith(
                           fontSize: 12.5,
-                          color: isDark ? AppColors.textLight.withValues(alpha: 0.8) : AppColors.textMuted,
+                          color: isDark
+                              ? AppColors.textLight.withValues(alpha: 0.8)
+                              : AppColors.textMuted,
                         ),
                       ),
                     ],
@@ -824,9 +1004,10 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
             level: 1,
             title: 'Level 1: Beginner',
             timeSeconds: 10,
-            gridDesc: '5x5 Grid',
-            description: 'Creeping vine borders & cardinal crosses with strong bilateral symmetry.',
-            examples: 'Eulerian Sikku Vine, Square Padi Cross, Kambi Knot',
+            gridDesc: '4x4 Grid',
+            heartsCount: 3,
+            description: 'Bilateral reflection across vertical or horizontal axis.',
+            examples: 'Bilateral Sikku Vine, Water Lotus Reflection',
             color: AppColors.tulsiGreen,
             isDark: isDark,
           ),
@@ -837,8 +1018,9 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
             title: 'Level 2: Skilled',
             timeSeconds: 7,
             gridDesc: '5x5 Grid',
-            description: 'Continuous Eulerian knots and sacred lotus petals wrapping around pulli dots.',
-            examples: 'Thaamarai Floral, Ashtalakshmi Mandala, Brahma Mudi',
+            heartsCount: 3,
+            description: 'Diagonal ray reflection & 90° cyclic rotational invariant loops.',
+            examples: 'Sanctum Diagonal, Swirling Chakra Pinwheel',
             color: AppColors.turmericAmber,
             isDark: isDark,
           ),
@@ -848,9 +1030,10 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
             level: 3,
             title: 'Level 3: Adept',
             timeSeconds: 5,
-            gridDesc: '7x7 Grid',
-            description: 'Braided knots & radiating peacock feather curves with 4-fold rotational symmetry.',
-            examples: 'Sudarshana Wheel, Mayil Peacock Feather',
+            gridDesc: '6x6 Grid',
+            heartsCount: 3,
+            description: 'Full D4 8-fold dihedral symmetry with 4 reflection planes & rotation.',
+            examples: 'Sudarshana 8-Way Mandala, Temple Sanctum',
             color: AppColors.terracottaRed,
             isDark: isDark,
           ),
@@ -860,9 +1043,10 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
             level: 4,
             title: 'Level 4: Master',
             timeSeconds: 3,
-            gridDesc: '7x7 & 9x9 Grid',
-            description: 'Grand sacred temple Padi mandalas & 9-planet celestial yantras.',
-            examples: 'Navagraha Celestial Yantra, Temple Sanctum Step',
+            gridDesc: '8x8 Grid',
+            heartsCount: 5,
+            description: 'Grand sacred celestial yantra with intricate multi-loop dihedral weaving.',
+            examples: 'Celestial Ashta Dikpala Yantra, Cosmic Mandala',
             color: const Color(0xFF8E24AA),
             isDark: isDark,
           ),
@@ -877,6 +1061,7 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
     required String title,
     required int timeSeconds,
     required String gridDesc,
+    required int heartsCount,
     required String description,
     required String examples,
     required Color color,
@@ -920,16 +1105,17 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                   ),
                   child: Text(
                     title,
-                    style: AppTypography.tagText.copyWith(color: color, fontWeight: FontWeight.bold),
+                    style:
+                        AppTypography.tagText.copyWith(color: color, fontWeight: FontWeight.bold),
                   ),
                 ),
                 const Spacer(),
                 Row(
                   children: [
-                    const Icon(Icons.timer_rounded, size: 16, color: AppColors.turmericAmber),
-                    const SizedBox(width: 4),
+                    const Icon(Icons.timer_rounded, size: 15, color: AppColors.turmericAmber),
+                    const SizedBox(width: 3),
                     Text(
-                      '${timeSeconds}s Preview',
+                      '${timeSeconds}s',
                       style: AppTypography.tagText.copyWith(
                         fontWeight: FontWeight.bold,
                         color: AppColors.turmericAmber,
@@ -937,9 +1123,23 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                     ),
                   ],
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.favorite_rounded, size: 14, color: AppColors.crimsonRed),
+                    const SizedBox(width: 3),
+                    Text(
+                      '$heartsCount Hearts',
+                      style: AppTypography.tagText.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.crimsonRed,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
                     color: isDark ? AppColors.slateLight : Colors.grey.shade200,
                     borderRadius: BorderRadius.circular(6),
@@ -959,11 +1159,11 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
             const SizedBox(height: 6),
             Row(
               children: [
-                Icon(Icons.palette_outlined, size: 13, color: color.withValues(alpha: 0.8)),
+                Icon(Icons.auto_awesome_rounded, size: 13, color: color.withValues(alpha: 0.8)),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    'Patterns: $examples',
+                    'Archetype: $examples',
                     style: AppTypography.caption.copyWith(
                       fontSize: 11,
                       fontStyle: FontStyle.italic,
@@ -985,7 +1185,9 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('Start', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                      Text('Start',
+                          style: TextStyle(
+                              color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                       SizedBox(width: 2),
                       Icon(Icons.arrow_forward_rounded, size: 13, color: Colors.white),
                     ],
@@ -1006,8 +1208,55 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
   Widget _buildPreviewScreen(bool isDark) {
     return Column(
       children: [
-        // Pattern Cultural Info Header
-        _buildPatternHeader(isDark),
+        // Pattern Header Card
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.turmericGold.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _currentTarget.name,
+                      style: AppTypography.cardTitle.copyWith(fontSize: 16),
+                    ),
+                    Text(
+                      '${_currentTarget.tamilName} • ${_currentTarget.category}',
+                      style: AppTypography.caption.copyWith(
+                        color: AppColors.turmericAmber,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.terracottaRed.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.terracottaRed.withValues(alpha: 0.4)),
+                ),
+                child: Text(
+                  '${_gridSize}x$_gridSize Grid',
+                  style: const TextStyle(
+                    color: AppColors.terracottaRed,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
 
         // Countdown Timer Bar
         Container(
@@ -1035,7 +1284,7 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
               ),
               const SizedBox(width: 10),
               Text(
-                'Memorize the sacred pattern: ',
+                'Memorize the 16-Tile Kolam: ',
                 style: AppTypography.caption.copyWith(
                   fontWeight: FontWeight.w600,
                   color: AppColors.terracottaRed,
@@ -1053,7 +1302,7 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
           ),
         ),
 
-        // Authentic Provided Kolam Image Glimpse Area
+        // 16-Tile Kolam Preview Area
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1079,24 +1328,26 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    // Authentic Provided Kolam Image
-                    Image.asset(
-                      _currentPattern.assetPath,
-                      fit: BoxFit.contain,
-                      filterQuality: FilterQuality.high,
-                      errorBuilder: (context, error, stackTrace) => Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.image_not_supported_rounded, size: 48, color: AppColors.textMuted),
-                            const SizedBox(height: 8),
-                            Text('Authentic Kolam: ${_currentPattern.assetPath}', style: AppTypography.caption),
-                          ],
+                    // Render the 16-Tile NxN Pattern Preview
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: FittedBox(
+                          fit: BoxFit.contain,
+                          child: KolamNxNPreviewView(
+                            tiles: _currentTarget.targetTiles,
+                            gridDimension: _gridSize,
+                            size: 320,
+                            strokeWidth: _gridSize == 4
+                                ? 3.0
+                                : (_gridSize == 5 ? 2.6 : (_gridSize == 6 ? 2.2 : 1.8)),
+                            showDots: true,
+                          ),
                         ),
                       ),
                     ),
 
-                    // Top "Authentic Kolam Glimpse" badge
+                    // Top Badge: Category
                     Positioned(
                       top: 12,
                       right: 12,
@@ -1113,14 +1364,15 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.visibility_rounded, size: 15, color: AppColors.turmericAmber),
+                            const Icon(Icons.auto_awesome_rounded,
+                                size: 15, color: AppColors.turmericAmber),
                             const SizedBox(width: 6),
                             Text(
-                              'Authentic Kolam Glimpse',
+                              _currentTarget.category,
                               style: AppTypography.tagText.copyWith(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 11.5,
+                                fontSize: 11,
                               ),
                             ),
                           ],
@@ -1128,7 +1380,7 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                       ),
                     ),
 
-                    // Bottom info ribbon
+                    // Bottom Lore Ribbon
                     Positioned(
                       bottom: 0,
                       left: 0,
@@ -1147,29 +1399,19 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.lightbulb_outline_rounded, size: 16, color: AppColors.turmericAmber),
+                            const Icon(Icons.lightbulb_outline_rounded,
+                                size: 16, color: AppColors.turmericAmber),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                'Study loops, petal curves, and pulli alignments',
+                                _currentTarget.culturalLore,
                                 style: AppTypography.caption.copyWith(
                                   color: Colors.white.withValues(alpha: 0.9),
                                   fontSize: 11.5,
                                   fontStyle: FontStyle.italic,
                                 ),
-                                maxLines: 1,
+                                maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: AppColors.terracottaRed,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '${_currentPattern.gridSize}x${_currentPattern.gridSize} Grid',
-                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
                               ),
                             ),
                           ],
@@ -1185,11 +1427,11 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
 
         // Skip to Drawing Action
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
           child: OutlinedButton.icon(
             onPressed: _transitionToDrawingPhase,
             icon: const Icon(Icons.flash_on_rounded, color: AppColors.turmericAmber, size: 18),
-            label: const Text('Memorized! Start Drawing Now'),
+            label: const Text('Memorized! Start Recreating Now'),
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(double.infinity, 44),
               side: const BorderSide(color: AppColors.turmericAmber, width: 1.5),
@@ -1201,177 +1443,233 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
   }
 
   // ==========================================
-  // PHASE 3: DRAWING SCREEN (Blank Canvas + Tools)
+  // PHASE 3: DRAWING SCREEN (Exact Studio 16-Tile Canvas)
   // ==========================================
 
   Widget _buildDrawingScreen(bool isDark) {
     return Column(
       children: [
-        // Pattern Header & Stopwatch
+        // Top Action Header (Lives, Peek Hint, Grid, Live Timer, Undo/Redo/Clear)
         Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: isDark ? AppColors.slateCard : const Color(0xFFFAF3EA),
+            color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
             border: Border(
-              bottom: BorderSide(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+              bottom: BorderSide(
+                color: isDark ? AppColors.borderDark : AppColors.borderLight,
+              ),
             ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
                 children: [
-                  Text(
-                    'Recreating: ${_currentPattern.name}',
-                    style: AppTypography.cardTitle.copyWith(fontSize: 13.5),
+                  // Lives (Hearts)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.crimsonRed.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.crimsonRed.withValues(alpha: 0.35)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: List.generate(_maxLives, (i) {
+                        final isAlive = i < _livesRemaining;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                          child: Icon(
+                            isAlive ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                            size: 18,
+                            color: isAlive ? AppColors.crimsonRed : Colors.grey.shade400,
+                          ),
+                        );
+                      }),
+                    ),
                   ),
-                  Text(
-                    'Connect the pulli dots from mental recall',
-                    style: AppTypography.caption.copyWith(fontSize: 11, color: AppColors.turmericAmber),
+                  const SizedBox(width: 8),
+
+                  // Peek Hint Button (Costs 1 Heart / Life)
+                  ElevatedButton.icon(
+                    onPressed: _livesRemaining > 0 ? _openHintPeek : null,
+                    icon: Icon(
+                      Icons.visibility_rounded,
+                      size: 14,
+                      color: _livesRemaining > 0 ? Colors.white : Colors.grey,
+                    ),
+                    label: Text(
+                      'Peek Hint (❤️ $_livesRemaining left)',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.turmericAmber,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor:
+                          isDark ? AppColors.slateLight : Colors.grey.shade300,
+                      disabledForegroundColor: Colors.grey,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+
+                  const Spacer(),
+
+                  // Matching Grid Indicator
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.slateLight : AppColors.borderLight,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${_gridSize}x$_gridSize',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11.5,
+                        color: isDark ? Colors.white : AppColors.textDark,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+
+                  // Live Stopwatch Timer
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.turmericAmber.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppColors.turmericAmber.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.schedule_rounded,
+                            size: 12, color: AppColors.turmericAmber),
+                        const SizedBox(width: 3),
+                        Text(
+                          '${_elapsedDrawingSeconds.toStringAsFixed(1)}s',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            color: AppColors.turmericAmber,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.turmericAmber.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.turmericAmber.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.schedule_rounded, size: 14, color: AppColors.turmericAmber),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${_elapsedDrawingSeconds.toStringAsFixed(1)}s',
-                      style: AppTypography.tagText.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.turmericAmber,
-                      ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(Icons.undo_rounded, size: 20),
+                    tooltip: 'Undo',
+                    onPressed: _canUndo ? _undoAction : null,
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(Icons.redo_rounded, size: 20),
+                    tooltip: 'Redo',
+                    onPressed: _canRedo ? _redoAction : null,
+                  ),
+                  const Spacer(),
+                  Text(
+                    'Tap dots to cycle arcs • Drag between dots to link',
+                    style: AppTypography.caption.copyWith(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: isDark
+                          ? AppColors.textLight.withValues(alpha: 0.7)
+                          : AppColors.textMuted,
                     ),
-                  ],
-                ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    icon: Icon(
+                      Icons.delete_sweep_rounded,
+                      size: 20,
+                      color: _tileStates.isNotEmpty
+                          ? Colors.redAccent
+                          : (isDark
+                              ? Colors.redAccent.withValues(alpha: 0.35)
+                              : Colors.red.withValues(alpha: 0.35)),
+                    ),
+                    tooltip: 'Clear Canvas',
+                    onPressed: _tileStates.isNotEmpty ? _clearCanvas : null,
+                  ),
+                ],
               ),
             ],
           ),
         ),
 
-        // Tool Mode Switcher Bar
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.slateLight : Colors.grey.shade100,
-            border: Border(
-              bottom: BorderSide(color: isDark ? AppColors.borderDark : AppColors.borderLight),
-            ),
-          ),
-          child: Row(
-            children: [
-              // Freehand vs Shapes Segmented Control
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.slateCard : Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
-                ),
-                child: Row(
-                  children: [
-                    _buildToolModeSegment(
-                      mode: DrawingToolMode.freehand,
-                      icon: Icons.brush_rounded,
-                      label: 'Freehand',
-                      isDark: isDark,
-                    ),
-                    _buildToolModeSegment(
-                      mode: DrawingToolMode.shapes,
-                      icon: Icons.auto_awesome_mosaic_rounded,
-                      label: 'Shapes',
-                      isDark: isDark,
-                    ),
-                  ],
-                ),
-              ),
-              const Spacer(),
-              // Undo Action
-              IconButton(
-                icon: const Icon(Icons.undo_rounded, size: 20),
-                tooltip: 'Undo Last',
-                onPressed: (_playerStrokes.isNotEmpty || _placedShapes.isNotEmpty) ? _undoLastAction : null,
-              ),
-              // Clear Action
-              IconButton(
-                icon: const Icon(Icons.clear_all_rounded, size: 20),
-                tooltip: 'Clear All',
-                onPressed: (_playerStrokes.isNotEmpty || _placedShapes.isNotEmpty) ? _clearCanvas : null,
-              ),
-            ],
-          ),
-        ),
-
-        // Canvas Area (Blank Dot Grid for Recreation)
+        // Exact Central Canvas Area (Square NxN Grid)
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: FittedBox(
-              fit: BoxFit.contain,
-              child: SizedBox(
-                width: 350,
-                height: 350,
-                child: KolamCanvasWidget(
-                  gridSize: _currentPattern.gridSize,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                KolamCanvasWidget(
+                  gridSize: _gridSize,
+                  orientation: KolamGridOrientation.square,
                   showDots: true,
-                  strokes: _playerStrokes,
-                  activeStroke: _activeStroke,
-                  isShapesMode: _toolMode == DrawingToolMode.shapes,
-                  placedShapes: _placedShapes,
-                  selectedShapeId: _selectedShapeId,
-                  snapHighlightPoint: _snapHighlightPoint,
-                  onPanStart: _onPanStart,
-                  onPanUpdate: _onPanUpdate,
-                  onPanEnd: _onPanEnd,
-                  onShapeDropped: _onShapeDropped,
-                  onShapeSelected: _onShapeSelected,
-                  onShapeRotated: _onShapeRotated,
-                  onShapeDeleted: _onShapeDeleted,
+                  canvasTheme: CanvasBackgroundTheme.templeSlate,
+                  kolamColor: _selectedColor,
+                  tileStates: _tileStates,
+                  selectedCircleIndex: _selectedCircleIndex,
+                  strokes: const [],
+                  onPanStart: _onCanvasPanStart,
+                  onPanUpdate: _onCanvasPanUpdate,
+                  onJoinCircles: _toggleJoinCircles,
+                  onCircleTapped: _onCircleTapped,
                 ),
-              ),
+              ],
             ),
           ),
         ),
 
-        // Tool Palette (Shapes Mode Palette or Freehand Controls)
-        if (_toolMode == DrawingToolMode.shapes)
-          ShapePaletteWidget(
-            onShapeSelected: _onShapeSelectedFromPalette,
-            isDark: isDark,
-          )
-        else
-          _buildFreehandControlBar(isDark),
-
-        // Submit Memory Match Action
+        // Submit Memory Match Action Button
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
-            border: Border(top: BorderSide(color: isDark ? AppColors.borderDark : AppColors.borderLight)),
+            border: Border(
+                top: BorderSide(
+                    color: isDark ? AppColors.borderDark : AppColors.borderLight)),
           ),
           child: Row(
             children: [
-              Text(
-                '${_playerStrokes.length} lines  •  ${_placedShapes.length} shapes',
-                style: AppTypography.caption.copyWith(fontWeight: FontWeight.w600),
+              Expanded(
+                child: Text(
+                  '${_tileStates.length} Active Nodes • $_livesRemaining Hearts Left',
+                  style: AppTypography.caption
+                      .copyWith(fontWeight: FontWeight.w600, fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               ElevatedButton.icon(
                 onPressed: _evaluateSubmission,
                 icon: const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-                label: const Text('Submit Memory Match', style: TextStyle(fontWeight: FontWeight.bold)),
+                label: const Text('Submit Memory Match',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.turmericGold,
                   foregroundColor: Colors.black87,
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
                 ),
               ),
             ],
@@ -1381,120 +1679,8 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
     );
   }
 
-  Widget _buildToolModeSegment({
-    required DrawingToolMode mode,
-    required IconData icon,
-    required String label,
-    required bool isDark,
-  }) {
-    final isSelected = _toolMode == mode;
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _toolMode = mode;
-          _selectedShapeId = null;
-        });
-      },
-      borderRadius: BorderRadius.circular(9),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.turmericGold : Colors.transparent,
-          borderRadius: BorderRadius.circular(9),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 15,
-              color: isSelected ? Colors.black87 : (isDark ? Colors.white70 : Colors.black54),
-            ),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? Colors.black87 : (isDark ? Colors.white70 : Colors.black54),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFreehandControlBar(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
-      child: Row(
-        children: [
-          Text('Chalk Style:', style: AppTypography.caption.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(width: 10),
-          _buildColorDot(Colors.white, 'Rice Flour'),
-          _buildColorDot(AppColors.turmericGold, 'Turmeric'),
-          _buildColorDot(AppColors.kaaviBrick, 'Kaavi'),
-          const Spacer(),
-          Text('Width:', style: AppTypography.caption),
-          const SizedBox(width: 4),
-          _buildStrokeWidthChip(2.5, 'Fine'),
-          _buildStrokeWidthChip(3.5, 'Medium'),
-          _buildStrokeWidthChip(5.5, 'Thick'),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildColorDot(Color color, String label) {
-    final isSelected = _currentColor == color;
-    return InkWell(
-      onTap: () => setState(() => _currentColor = color),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        width: 22,
-        height: 22,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: isSelected ? AppColors.turmericGold : Colors.black26,
-            width: isSelected ? 2.5 : 1.0,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStrokeWidthChip(double width, String label) {
-    final isSelected = _strokeWidth == width;
-    return InkWell(
-      onTap: () => setState(() => _strokeWidth = width),
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.terracottaRed : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isSelected ? AppColors.terracottaRed : Colors.grey.shade400,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? Colors.white : null,
-          ),
-        ),
-      ),
-    );
-  }
-
   // ==========================================
-  // PHASE 4: RESULT SCREEN (Score Breakdown)
+  // PHASE 4: RESULT SCREEN (Score Breakdown & Replay)
   // ==========================================
 
   Widget _buildResultScreen(bool isDark) {
@@ -1540,7 +1726,11 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  isWin ? 'Authentic Pattern Recreated!' : 'Pattern Incomplete — Keep Practicing!',
+                  isWin
+                      ? 'Sacred 16-Tile Kolam Recreated!'
+                      : (breakdown.livesRemaining == 0
+                          ? 'Out of Hearts — Keep Practicing!'
+                          : 'Pattern Incomplete — Keep Practicing!'),
                   style: AppTypography.screenHeading.copyWith(fontSize: 19),
                   textAlign: TextAlign.center,
                 ),
@@ -1561,7 +1751,8 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
-                    color: (isWin ? AppColors.tulsiGreen : AppColors.crimsonRed).withValues(alpha: 0.15),
+                    color: (isWin ? AppColors.tulsiGreen : AppColors.crimsonRed)
+                        .withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Text(
@@ -1574,7 +1765,9 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  isWin ? '+50 XP Awarded for Visual Memory Win!' : '+15 XP Practice Effort Awarded',
+                  isWin
+                      ? '+50 XP Awarded for Visual Memory Mastery!'
+                      : '+15 XP Practice Effort Awarded',
                   style: AppTypography.caption.copyWith(
                     fontWeight: FontWeight.bold,
                     color: isWin ? AppColors.turmericAmber : Colors.grey,
@@ -1591,55 +1784,63 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
             decoration: BoxDecoration(
               color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
+              border: Border.all(
+                  color: isDark ? AppColors.borderDark : AppColors.borderLight),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Score Breakdown', style: AppTypography.cardTitle.copyWith(fontSize: 15)),
+                Text('Score Breakdown',
+                    style: AppTypography.cardTitle.copyWith(fontSize: 15)),
                 const SizedBox(height: 14),
 
-                // 1. Path Similarity (50 pts)
+                // 1. Tile Match Score (70 pts)
                 _buildBreakdownRow(
-                  title: 'Stroke / Path Similarity',
-                  scoreText: '${breakdown.pathSimilarityScore} / 50 pts',
-                  detailText: 'Coverage: ${breakdown.coveragePercent.toStringAsFixed(1)}%'
-                      '${breakdown.precisionPenalty > 0 ? " (Stray penalty: -${breakdown.precisionPenalty.toStringAsFixed(1)})" : ""}',
-                  progressRatio: (breakdown.pathSimilarityScore / 50.0).clamp(0.0, 1.0),
+                  title: '16-Tile Pattern Match',
+                  scoreText: '${breakdown.tileScore} / 70 pts',
+                  detailText:
+                      '${breakdown.matchedTiles} of ${breakdown.totalTiles} tiles matched (${breakdown.matchPercentage.toStringAsFixed(0)}%)',
+                  progressRatio:
+                      (breakdown.tileScore / 70.0).clamp(0.0, 1.0),
                   color: AppColors.turmericAmber,
                 ),
                 const Divider(height: 22),
 
-                // 2. Connection Points (30 pts)
+                // 2. Time Taken Bonus (10 pts)
                 _buildBreakdownRow(
-                  title: 'Sacred Pulli Dots Connected',
-                  scoreText: '${breakdown.connectionPointsScore} / 30 pts',
-                  detailText: '${breakdown.matchedConnectionDots} of ${breakdown.totalTargetDots} key anchor dots connected',
-                  progressRatio: (breakdown.connectionPointsScore / 30.0).clamp(0.0, 1.0),
+                  title: 'Speed & Recall Bonus',
+                  scoreText: '${breakdown.timeBonusScore} / 10 pts',
+                  detailText:
+                      'Completed in ${breakdown.elapsedSeconds.toStringAsFixed(1)} seconds',
+                  progressRatio:
+                      (breakdown.timeBonusScore / 10.0).clamp(0.0, 1.0),
                   color: AppColors.tulsiGreen,
                 ),
                 const Divider(height: 22),
 
-                // 3. Time Taken Bonus (20 pts)
+                // 3. Hearts Preserved Bonus (20 pts)
                 _buildBreakdownRow(
-                  title: 'Speed & Recall Bonus',
-                  scoreText: '${breakdown.timeBonusScore} / 20 pts',
-                  detailText: 'Completed in ${breakdown.elapsedSeconds.toStringAsFixed(1)} seconds',
-                  progressRatio: (breakdown.timeBonusScore / 20.0).clamp(0.0, 1.0),
-                  color: AppColors.terracottaRed,
+                  title: 'Hearts Preserved Bonus',
+                  scoreText: '+${breakdown.livesBonus} / 20 pts',
+                  detailText:
+                      '${breakdown.livesRemaining} of ${breakdown.maxLives} Hearts remaining (${breakdown.livesUsed} peek hints spent)${breakdown.livesRemaining == breakdown.maxLives ? " • Flawless Recall!" : ""}',
+                  progressRatio:
+                      (breakdown.livesBonus / 20.0).clamp(0.0, 1.0),
+                  color: AppColors.crimsonRed,
                 ),
               ],
             ),
           ),
           const SizedBox(height: 16),
 
-          // Original Authentic Kolam Glimpse Card
+          // Side-by-side Target 16-Tile Kolam Card
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: AppColors.turmericGold.withValues(alpha: 0.4)),
+              border:
+                  Border.all(color: AppColors.turmericGold.withValues(alpha: 0.4)),
             ),
             child: Row(
               children: [
@@ -1648,12 +1849,18 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                   child: Container(
                     width: 80,
                     height: 80,
-                    color: isDark ? Colors.black38 : const Color(0xFFF5ECE0),
-                    child: Image.asset(
-                      _currentPattern.assetPath,
-                      fit: BoxFit.contain,
-                      filterQuality: FilterQuality.medium,
-                      errorBuilder: (_, _, _) => const Icon(Icons.image, color: AppColors.textMuted),
+                    color: isDark
+                        ? const Color(0xFF1E1614)
+                        : const Color(0xFFFAF2E7),
+                    padding: const EdgeInsets.all(4),
+                    child: Center(
+                      child: KolamNxNPreviewView(
+                        tiles: _currentTarget.targetTiles,
+                        gridDimension: _gridSize,
+                        size: 72,
+                        strokeWidth: 1.8,
+                        showDots: true,
+                      ),
                     ),
                   ),
                 ),
@@ -1662,70 +1869,24 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.verified_rounded, size: 16, color: AppColors.turmericAmber),
-                          const SizedBox(width: 5),
-                          Text(
-                            'Original Glimpsed Kolam',
-                            style: AppTypography.cardTitle.copyWith(fontSize: 13),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 3),
                       Text(
-                        '${_currentPattern.name} • ${_currentPattern.tamilName}',
+                        'Target: ${_currentTarget.name}',
+                        style: AppTypography.cardTitle.copyWith(fontSize: 14),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${_currentTarget.tamilName} • ${_currentTarget.category}',
                         style: AppTypography.caption.copyWith(
-                          fontSize: 11,
                           color: AppColors.turmericAmber,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        'Compare your memory recreation with the authentic pattern you observed.',
-                        style: AppTypography.caption.copyWith(
-                          fontSize: 11,
-                          color: isDark ? AppColors.textLight.withValues(alpha: 0.75) : AppColors.textMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Cultural Lore Box
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.slateLight : const Color(0xFFFAF3EA),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isDark ? AppColors.borderDark : AppColors.borderLight),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.auto_stories_rounded, size: 20, color: AppColors.turmericAmber),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'About ${_currentPattern.name} (${_currentPattern.tamilName})',
-                        style: AppTypography.cardTitle.copyWith(fontSize: 13),
-                      ),
                       const SizedBox(height: 4),
                       Text(
-                        _currentPattern.culturalLore,
-                        style: AppTypography.caption.copyWith(
-                          fontSize: 12,
-                          color: isDark ? AppColors.textLight.withValues(alpha: 0.8) : AppColors.textMuted,
-                        ),
+                        _currentTarget.culturalLore,
+                        style: AppTypography.caption.copyWith(fontSize: 11),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -1733,57 +1894,51 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
               ],
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
 
           // Action Buttons
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      _playerStrokes.clear();
-                      _activeStroke = null;
-                      _placedShapes.clear();
-                      _selectedShapeId = null;
-                    });
-                    _startCountdownTimer();
-                    setState(() {
-                      _phase = MemoryPhase.preview;
-                      _secondsLeft = _getCountdownSeconds(_difficulty);
-                    });
-                  },
-                  icon: const Icon(Icons.refresh_rounded, size: 17),
-                  label: const Text('Retry Same'),
+                  onPressed: () => _loadPatternAndStartCountdown(_difficulty),
+                  icon: const Icon(Icons.replay_rounded, size: 18),
+                  label: const Text('Try Another'),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () => _loadPatternAndStartCountdown(_difficulty),
-                  icon: const Icon(Icons.shuffle_rounded, color: Colors.white, size: 17),
-                  label: const Text('Next Kolam', style: TextStyle(color: Colors.white)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.terracottaRed,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+              const SizedBox(width: 10),
+              if (isWin && _difficulty < 4)
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _selectDifficultyAndStart(_difficulty + 1),
+                    icon: const Icon(Icons.trending_up_rounded, size: 18),
+                    label: const Text('Next Level'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.turmericGold,
+                      foregroundColor: Colors.black87,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _saveRecreatedKolam,
+                    icon: const Icon(Icons.bookmark_add_rounded, size: 18),
+                    label: const Text('Save to Gallery'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.tulsiGreen,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
-          const SizedBox(height: 10),
-          TextButton.icon(
-            onPressed: () {
-              setState(() {
-                _phase = MemoryPhase.difficultySelect;
-              });
-            },
-            icon: const Icon(Icons.tune_rounded, size: 16),
-            label: const Text('Change Difficulty Level'),
-          ),
+          const SizedBox(height: 12),
         ],
       ),
     );
@@ -1802,79 +1957,27 @@ class _MemoryGameScreenState extends ConsumerState<MemoryGameScreen> with Single
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(title, style: AppTypography.cardTitle.copyWith(fontSize: 13)),
-            Text(
-              scoreText,
-              style: AppTypography.cardTitle.copyWith(fontSize: 13, color: color),
-            ),
+            Text(title,
+                style:
+                    AppTypography.bodyText.copyWith(fontWeight: FontWeight.bold)),
+            Text(scoreText,
+                style: AppTypography.caption
+                    .copyWith(color: color, fontWeight: FontWeight.bold)),
           ],
         ),
         const SizedBox(height: 4),
-        Text(detailText, style: AppTypography.caption.copyWith(fontSize: 11)),
-        const SizedBox(height: 8),
+        Text(detailText, style: AppTypography.caption.copyWith(fontSize: 11.5)),
+        const SizedBox(height: 6),
         ClipRRect(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
             value: progressRatio,
-            backgroundColor: color.withValues(alpha: 0.15),
-            valueColor: AlwaysStoppedAnimation<Color>(color),
             minHeight: 6,
+            backgroundColor: Colors.grey.withValues(alpha: 0.2),
+            valueColor: AlwaysStoppedAnimation<Color>(color),
           ),
         ),
       ],
-    );
-  }
-
-  // Cultural Header
-  Widget _buildPatternHeader(bool isDark) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.slateCard : const Color(0xFFFAF3EA),
-        border: Border(
-          bottom: BorderSide(
-            color: isDark ? AppColors.borderDark : AppColors.borderLight,
-          ),
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _currentPattern.name,
-                  style: AppTypography.cardTitle.copyWith(fontSize: 14),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  '${_currentPattern.tamilName} • ${_currentPattern.category}',
-                  style: AppTypography.caption.copyWith(
-                    fontSize: 11,
-                    color: AppColors.turmericAmber,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: AppColors.terracottaRed.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              '${_currentPattern.gridSize}x${_currentPattern.gridSize} Grid',
-              style: AppTypography.tagText.copyWith(color: AppColors.terracottaRed, fontSize: 10),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

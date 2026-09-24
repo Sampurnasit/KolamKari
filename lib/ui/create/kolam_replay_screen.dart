@@ -251,17 +251,17 @@ class _KolamReplayScreenState extends State<KolamReplayScreen>
                       width: canvasDim,
                       height: canvasDim,
                       decoration: BoxDecoration(
-                        color: isDark ? AppColors.slateDark : const Color(0xFF261E21),
+                        color: isDark ? AppColors.slateDark : AppColors.riceFlourBg,
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.3),
+                            color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.08),
                             blurRadius: 18,
                             offset: const Offset(0, 8),
                           ),
                         ],
                         border: Border.all(
-                          color: AppColors.turmericGold.withValues(alpha: 0.4),
+                          color: isDark ? AppColors.turmericGold.withValues(alpha: 0.4) : AppColors.borderLight,
                           width: 2.0,
                         ),
                       ),
@@ -467,11 +467,11 @@ class _ReplayCanvasPainter extends CustomPainter {
     // 1. Draw Pulli Dot Grid
     final step = size.width / (gridSize + 1);
     final dotPaint = Paint()
-      ..color = const Color(0xFFFBF4E8).withValues(alpha: 0.85)
+      ..color = (isDark ? const Color(0xFFFBF4E8) : AppColors.kaaviBrick).withValues(alpha: 0.85)
       ..style = PaintingStyle.fill;
 
     final dotGlowPaint = Paint()
-      ..color = AppColors.turmericGold.withValues(alpha: 0.35)
+      ..color = AppColors.turmericGold.withValues(alpha: isDark ? 0.35 : 0.15)
       ..style = PaintingStyle.fill;
 
     for (int r = 1; r <= gridSize; r++) {
@@ -518,10 +518,10 @@ class _ReplayCanvasPainter extends CustomPainter {
     // 4. Highlight Currently-Drawing Tip (Glowing golden halo and chalk tip)
     if (activeDrawingHead != null) {
       // Outer radiant aura
-      final outerGlowPaint = Paint()
-        ..color = AppColors.turmericGold.withValues(alpha: 0.35)
-        ..style = PaintingStyle.fill;
-      canvas.drawCircle(activeDrawingHead, 12.0 * scale, outerGlowPaint);
+      final auraPaint = Paint()
+        ..color = AppColors.turmericGold.withValues(alpha: 0.4)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      canvas.drawCircle(activeDrawingHead, 14.0 * scale, auraPaint);
 
       // Inner golden ring
       final ringPaint = Paint()
@@ -532,24 +532,29 @@ class _ReplayCanvasPainter extends CustomPainter {
 
       // Center luminous tip
       final tipPaint = Paint()
-        ..color = Colors.white
+        ..color = isDark ? Colors.white : AppColors.terracottaRed
         ..style = PaintingStyle.fill;
       canvas.drawCircle(activeDrawingHead, 3.2 * scale, tipPaint);
     }
   }
 
   void _renderFullStroke(Canvas canvas, KolamStroke stroke, double scale) {
+    final rawColor = Color(stroke.colorValue);
+    final effectiveColor = (!isDark && (rawColor == const Color(0xFFFFFFFF) || rawColor.toARGB32() == 0xFFFFFFFF))
+        ? AppColors.terracottaRed
+        : rawColor;
+
     if (stroke.points.length < 2) {
       final p = stroke.points.first;
       final paint = Paint()
-        ..color = Color(stroke.colorValue)
+        ..color = effectiveColor
         ..style = PaintingStyle.fill;
       canvas.drawCircle(Offset(p.x * scale, p.y * scale), stroke.strokeWidth * scale / 2, paint);
       return;
     }
 
     final paint = Paint()
-      ..color = Color(stroke.colorValue)
+      ..color = effectiveColor
       ..strokeWidth = stroke.strokeWidth * scale
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round

@@ -4,12 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_typography.dart';
-import '../../data/models/analysis_result.dart';
+import '../../data/models/kolam_circle_connection.dart';
 import '../../data/models/saved_kolam.dart';
 import '../../providers/app_providers.dart';
 import '../../services/analysis_service.dart';
 import 'widgets/kolam_canvas_widget.dart';
-import 'kolam_replay_screen.dart';
 
 enum KolamSortType {
   newest('Newest Date'),
@@ -299,7 +298,7 @@ class _MyKolamsGalleryScreenState extends ConsumerState<MyKolamsGalleryScreen> {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: () => _showKolamDetailDialog(context, kolam, strokes, isDark),
+        onTap: () => _openInCanvas(context, kolam),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -310,14 +309,17 @@ class _MyKolamsGalleryScreenState extends ConsumerState<MyKolamsGalleryScreen> {
                   Container(
                     width: double.infinity,
                     height: double.infinity,
-                    color: const Color(0xFF23191D), // Deep authentic earthen background
+                    color: isDark ? const Color(0xFF23191D) : AppColors.riceFlourBg,
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: KolamCanvasWidget(
                           gridSize: kolam.gridSize,
+                          orientation: kolam.gridOrientation,
                           showDots: true,
+                          tileStates: kolam.tileStates,
+                          kolamColor: Color(kolam.colorValue),
                           strokes: strokes,
                           onPanStart: (_) {},
                           onPanUpdate: (_) {},
@@ -362,7 +364,7 @@ class _MyKolamsGalleryScreenState extends ConsumerState<MyKolamsGalleryScreen> {
 
             // Card details
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+              padding: const EdgeInsets.fromLTRB(10, 8, 4, 6),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -372,40 +374,24 @@ class _MyKolamsGalleryScreenState extends ConsumerState<MyKolamsGalleryScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
                         child: Text(
-                          '${kolam.gridSize}x${kolam.gridSize} • $dateStr',
+                          '${kolam.gridSize}x${kolam.gridSize} ${kolam.gridOrientation == KolamGridOrientation.diamond ? "Diamond" : "Square"} • $dateStr',
                           style: AppTypography.caption.copyWith(fontSize: 10.5),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      InkWell(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => KolamReplayScreen(
-                                title: kolam.name,
-                                category: kolam.culturalTag ?? (kolam.isTracedCopy ? 'Traced Kolam' : 'Original Creation'),
-                                gridSize: kolam.gridSize,
-                                strokes: strokes,
-                              ),
-                            ),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: const Padding(
-                          padding: EdgeInsets.all(2),
-                          child: Icon(
-                            Icons.play_circle_fill_rounded,
-                            size: 20,
-                            color: AppColors.turmericAmber,
-                          ),
-                        ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.crimsonRed),
+                        tooltip: 'Delete Kolam',
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.all(4),
+                        constraints: const BoxConstraints(),
+                        onPressed: () => _promptDeleteKolam(context, kolam),
                       ),
                     ],
                   ),
@@ -460,335 +446,8 @@ class _MyKolamsGalleryScreenState extends ConsumerState<MyKolamsGalleryScreen> {
     );
   }
 
-  // --- Detail View Dialog ---
-
-  void _showKolamDetailDialog(
-    BuildContext context,
-    SavedKolam kolam,
-    List<KolamStroke> strokes,
-    bool isDark,
-  ) {
-    final analysis = kolam.analysisResult;
-    final formattedDate = DateFormat('EEEE, dd MMMM yyyy • hh:mm a').format(kolam.createdDate);
-
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          return AlertDialog(
-            titlePadding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
-            contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-            title: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    kolam.name,
-                    style: AppTypography.screenHeading.copyWith(fontSize: 18),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit_outlined, size: 20),
-                      tooltip: 'Rename Kolam',
-                      onPressed: () {
-                        _promptRenameKolam(context, kolam, () {
-                          Navigator.of(dialogCtx).pop();
-                        });
-                      },
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.crimsonRed),
-                      tooltip: 'Delete Kolam',
-                      onPressed: () {
-                        _promptDeleteKolam(context, kolam, () {
-                          Navigator.of(dialogCtx).pop();
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            content: SizedBox(
-              width: 320,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Full Pattern Render in traditional canvas box
-                    Center(
-                      child: Container(
-                        height: 230,
-                        width: 230,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF261E21),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isDark ? AppColors.borderDark : AppColors.borderLight,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.15),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(15),
-                          child: KolamCanvasWidget(
-                            gridSize: kolam.gridSize,
-                            showDots: true,
-                            strokes: strokes,
-                            onPanStart: (_) {},
-                            onPanUpdate: (_) {},
-                            onPanEnd: () {},
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Attribution Banner: Traced from sample vs Original creation
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: kolam.isTracedCopy
-                            ? AppColors.turmericAmber.withValues(alpha: 0.12)
-                            : AppColors.tulsiGreen.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: kolam.isTracedCopy
-                              ? AppColors.turmericAmber.withValues(alpha: 0.3)
-                              : AppColors.tulsiGreen.withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            kolam.isTracedCopy ? Icons.history_edu_rounded : Icons.brush_rounded,
-                            size: 16,
-                            color: kolam.isTracedCopy ? AppColors.turmericAmber : AppColors.tulsiGreen,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  kolam.isTracedCopy ? 'Traced from Sample Design' : 'Original Studio Creation',
-                                  style: AppTypography.cardTitle.copyWith(
-                                    fontSize: 12,
-                                    color: kolam.isTracedCopy ? AppColors.turmericAmber : AppColors.tulsiGreen,
-                                  ),
-                                ),
-                                if (kolam.culturalTag != null && kolam.culturalTag!.isNotEmpty)
-                                  Text(
-                                    kolam.culturalTag!,
-                                    style: AppTypography.caption.copyWith(fontSize: 10.5),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Date & Basic Metrics Row
-                    Text(
-                      'Saved on $formattedDate',
-                      style: AppTypography.caption.copyWith(fontSize: 11),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Analysis Result Details
-                    if (analysis != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: isDark ? AppColors.slateDark : AppColors.riceFlourBg,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isDark ? AppColors.borderDark : AppColors.borderLight,
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.auto_awesome_rounded, size: 14, color: AppColors.turmericAmber),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    'Sacred Geometry Analysis',
-                                    style: AppTypography.cardTitle.copyWith(fontSize: 12),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _buildComplexityBadge(kolam.complexityScore),
-                              ],
-                            ),
-                            const Divider(height: 16),
-                            _buildDetailRow('Symmetry Family', _formatSymmetryName(analysis.symmetryType)),
-                            _buildDetailRow('Rotational Order', analysis.rotationalSymmetrySummary != 'None' ? '${analysis.rotationalSymmetrySummary} Invariant' : 'None'),
-                            _buildDetailRow('Reflection Detected', analysis.reflectionDetected ? 'Yes (${analysis.reflectionAxesCount} Axes)' : 'None'),
-                            _buildDetailRow('Structure', analysis.structureSummary.isNotEmpty ? analysis.structureSummary : '${kolam.gridSize}x${kolam.gridSize} Grid • ${analysis.closedLoopCount} Loops'),
-                            if (analysis.culturalInterpretation.isNotEmpty) ...[
-                              const SizedBox(height: 6),
-                              Text(
-                                analysis.culturalInterpretation,
-                                style: AppTypography.bodyText.copyWith(fontSize: 11.5, fontStyle: FontStyle.italic),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ] else ...[
-                      // Fallback when analysis is not stored
-                      Row(
-                        children: [
-                          Expanded(child: _buildMiniStat('Grid Size', '${kolam.gridSize}x${kolam.gridSize}')),
-                          Expanded(child: _buildMiniStat('Complexity', '${kolam.complexityScore}/100')),
-                          Expanded(child: _buildMiniStat('Strokes', '${strokes.length}')),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-
-                    // Prominent Replay Button: "Watch how this was drawn"
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.turmericGold,
-                          foregroundColor: Colors.black87,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          elevation: 3,
-                        ),
-                        icon: const Icon(Icons.play_circle_fill_rounded, size: 22, color: Colors.black87),
-                        label: const Text(
-                          'Watch how this was drawn',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                        onPressed: () {
-                          Navigator.of(dialogCtx).pop();
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => KolamReplayScreen(
-                                title: kolam.name,
-                                category: kolam.culturalTag ?? (kolam.isTracedCopy ? 'Traced Kolam' : 'Original Creation'),
-                                gridSize: kolam.gridSize,
-                                strokes: strokes,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogCtx).pop(),
-                child: const Text('Close'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: AppTypography.caption.copyWith(fontSize: 11)),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              value,
-              style: AppTypography.cardTitle.copyWith(fontSize: 11.5),
-              textAlign: TextAlign.end,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMiniStat(String label, String value) {
-    return Column(
-      children: [
-        Text(label, style: AppTypography.caption),
-        const SizedBox(height: 2),
-        Text(value, style: AppTypography.cardTitle.copyWith(fontSize: 13)),
-      ],
-    );
-  }
-
-  // --- Rename Action ---
-
-  void _promptRenameKolam(BuildContext context, SavedKolam kolam, [VoidCallback? onRenamed]) {
-    final controller = TextEditingController(text: kolam.name);
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Rename Kolam'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Kolam Name',
-            hintText: 'e.g. Lotus Sikku Twilight',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final newName = controller.text.trim();
-              if (newName.isNotEmpty) {
-                Navigator.of(ctx).pop();
-                await ref.read(savedKolamsProvider.notifier).rename(kolam.id, newName);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      backgroundColor: AppColors.tulsiGreen,
-                      content: Text('Renamed to "$newName"'),
-                    ),
-                  );
-                }
-                onRenamed?.call();
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
+  void _openInCanvas(BuildContext context, SavedKolam kolam) {
+    Navigator.of(context).pop(kolam);
   }
 
   // --- Delete with Confirmation Action ---
@@ -914,25 +573,6 @@ class _MyKolamsGalleryScreenState extends ConsumerState<MyKolamsGalleryScreen> {
         ),
       ),
     );
-  }
-
-  String _formatSymmetryName(SymmetryType type) {
-    switch (type) {
-      case SymmetryType.dihedralD4:
-        return 'Dihedral D4 (Mandala)';
-      case SymmetryType.fourFoldReflection:
-        return '4-Fold Reflection';
-      case SymmetryType.twoFoldReflection:
-        return '2-Fold Dual Mirror';
-      case SymmetryType.bilateralReflection:
-        return 'Bilateral Reflection';
-      case SymmetryType.rotational90:
-        return '90° 4-Fold Rotation';
-      case SymmetryType.rotational180:
-        return '180° 2-Fold Rotation';
-      case SymmetryType.none:
-        return 'Organic Freeform';
-    }
   }
 
   List<KolamStroke> _decodeStrokes(String jsonStr) {

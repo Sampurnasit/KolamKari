@@ -17,6 +17,7 @@ class MeProfileScreen extends ConsumerWidget {
     final profile = ref.watch(userProfileProvider);
     final completedDates = ref.watch(completedChallengeDatesProvider);
     final progressHistory = ref.watch(progressHistoryProvider);
+    final themeMode = ref.watch(themeModeProvider);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
@@ -24,14 +25,26 @@ class MeProfileScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('My Heritage Sanctuary'),
         centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+            icon: Icon(
+              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              color: isDark ? AppColors.turmericGold : AppColors.terracottaRed,
+            ),
+            onPressed: () {
+              ref.read(themeModeProvider.notifier).toggleTheme(isDark);
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. Level & XP Hero Card
-            _buildLevelHeroCard(profile, isDark),
+            // 1. Level & XP Hero Card (Displaying User's Name)
+            _buildLevelHeroCard(ref, profile, isDark, context),
             const SizedBox(height: 20),
 
             // 2. Streak Counter & 28-Day Heatmap Calendar
@@ -48,6 +61,10 @@ class MeProfileScreen extends ConsumerWidget {
 
             // 5. 8 Levels Heritage Guide
             _buildLevelsGuideExpansion(profile.level, isDark),
+            const SizedBox(height: 24),
+
+            // 6. App Theme Appearance Settings
+            _buildThemeSettingsCard(ref, themeMode, isDark),
           ],
         ),
       ),
@@ -58,7 +75,7 @@ class MeProfileScreen extends ConsumerWidget {
   // 1. XP + LEVEL SECTION
   // ==========================================
 
-  Widget _buildLevelHeroCard(UserProfile profile, bool isDark) {
+  Widget _buildLevelHeroCard(WidgetRef ref, UserProfile profile, bool isDark, BuildContext context) {
     final (lvl, title, curBase, nextBase) = GamificationService.calculateLevel(profile.xp);
     final progressInTier = nextBase > curBase
         ? ((profile.xp - curBase) / (nextBase - curBase)).clamp(0.0, 1.0)
@@ -67,7 +84,7 @@ class MeProfileScreen extends ConsumerWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isDark
@@ -138,17 +155,56 @@ class MeProfileScreen extends ConsumerWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: AppTypography.screenHeading.copyWith(fontSize: 20),
-                    ),
-                    const SizedBox(height: 3),
+                    // 1. Name
                     Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            profile.name,
+                            style: AppTypography.screenHeading.copyWith(fontSize: 20),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.edit_outlined,
+                            size: 18,
+                            color: isDark ? AppColors.turmericGold : AppColors.terracottaRed,
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          tooltip: 'Edit Name',
+                          onPressed: () => _showEditProfileDialog(context, ref, profile, isDark),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+
+                    // 2. Generated Username
+                    Text(
+                      profile.username,
+                      style: AppTypography.caption.copyWith(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? AppColors.turmericGold : AppColors.terracottaRed,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+
+                    // 3. Level & Rank Generic Title, beside it Heritage XP (Wrap prevents overflow on compact screens)
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -157,14 +213,13 @@ class MeProfileScreen extends ConsumerWidget {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            'Level $lvl',
+                            'Level $lvl • $title',
                             style: AppTypography.tagText.copyWith(
                               color: AppColors.turmericAmber,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
                         Text(
                           '${profile.xp} Heritage XP',
                           style: AppTypography.caption.copyWith(
@@ -1015,7 +1070,7 @@ class MeProfileScreen extends ConsumerWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: history.take(15).length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (ctx, index) {
               final event = history[index];
               return _buildHistoryTile(event, isDark);
@@ -1215,4 +1270,268 @@ class MeProfileScreen extends ConsumerWidget {
     ),
   );
 }
+
+  Widget _buildThemeSettingsCard(WidgetRef ref, ThemeMode currentMode, bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.slateCard : AppColors.riceFlourCard,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark ? AppColors.borderDark : AppColors.borderLight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black26 : AppColors.terracottaRed.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: (isDark ? AppColors.turmericGold : AppColors.terracottaRed).withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                  size: 20,
+                  color: isDark ? AppColors.turmericGold : AppColors.terracottaRed,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'App Appearance',
+                      style: AppTypography.cardTitle.copyWith(fontSize: 15),
+                    ),
+                    Text(
+                      'Choose between Temple Slate Dark or Rice Flour Light',
+                      style: AppTypography.caption.copyWith(fontSize: 11.5),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _buildThemeOption(
+                  ref: ref,
+                  mode: ThemeMode.system,
+                  currentMode: currentMode,
+                  label: 'System',
+                  icon: Icons.brightness_auto_rounded,
+                  isDark: isDark,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildThemeOption(
+                  ref: ref,
+                  mode: ThemeMode.light,
+                  currentMode: currentMode,
+                  label: 'Light',
+                  icon: Icons.light_mode_rounded,
+                  isDark: isDark,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildThemeOption(
+                  ref: ref,
+                  mode: ThemeMode.dark,
+                  currentMode: currentMode,
+                  label: 'Dark',
+                  icon: Icons.dark_mode_rounded,
+                  isDark: isDark,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditProfileDialog(BuildContext context, WidgetRef ref, UserProfile profile, bool isDark) {
+    final nameController = TextEditingController(text: profile.name);
+    String liveUsername = profile.username;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? AppColors.slateDark : AppColors.riceFlourBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                24,
+                20,
+                24,
+                MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Edit Profile Name',
+                        style: AppTypography.screenHeading.copyWith(fontSize: 20),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.of(ctx).pop(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: nameController,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.words,
+                    style: AppTypography.cardTitle.copyWith(fontSize: 16),
+                    onChanged: (val) {
+                      setModalState(() {
+                        liveUsername = UserProfile.generateUsername(val);
+                      });
+                    },
+                    decoration: InputDecoration(
+                      labelText: 'Your Name',
+                      hintText: 'e.g. Sampurna',
+                      prefixIcon: const Icon(Icons.person_outline_rounded, color: AppColors.terracottaRed),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Icon(Icons.alternate_email_rounded, size: 15, color: AppColors.turmericGold),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Auto-generated handle: ',
+                        style: AppTypography.caption.copyWith(fontSize: 12),
+                      ),
+                      Text(
+                        liveUsername,
+                        style: AppTypography.caption.copyWith(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? AppColors.turmericGold : AppColors.terracottaRed,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        final rawName = nameController.text.trim();
+                        final finalName = rawName.isNotEmpty ? rawName : 'Kolam Artisan';
+                        final finalUsername = UserProfile.generateUsername(finalName);
+                        await ref.read(userProfileProvider.notifier).updateProfileName(
+                          name: finalName,
+                          username: finalUsername,
+                        );
+                        if (context.mounted) {
+                          Navigator.of(ctx).pop();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              backgroundColor: AppColors.tulsiGreen,
+                              content: Text('Profile updated successfully!'),
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.terracottaRed,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: const Text('Save Profile', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildThemeOption({
+    required WidgetRef ref,
+    required ThemeMode mode,
+    required ThemeMode currentMode,
+    required String label,
+    required IconData icon,
+    required bool isDark,
+  }) {
+    final isSelected = currentMode == mode;
+    return InkWell(
+      onTap: () => ref.read(themeModeProvider.notifier).setThemeMode(mode),
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (isDark ? AppColors.crimsonRed.withValues(alpha: 0.25) : AppColors.terracottaRed.withValues(alpha: 0.12))
+              : (isDark ? AppColors.slateLight.withValues(alpha: 0.5) : AppColors.riceFlourBg),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected
+                ? (isDark ? AppColors.turmericGold : AppColors.terracottaRed)
+                : (isDark ? AppColors.borderDark : AppColors.borderLight),
+            width: isSelected ? 1.8 : 1.0,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected
+                  ? (isDark ? AppColors.turmericGold : AppColors.terracottaRed)
+                  : (isDark ? Colors.white60 : AppColors.textMuted),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: AppTypography.caption.copyWith(
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected
+                    ? (isDark ? AppColors.turmericGold : AppColors.terracottaRed)
+                    : (isDark ? Colors.white70 : AppColors.textDark),
+                fontSize: 11.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
